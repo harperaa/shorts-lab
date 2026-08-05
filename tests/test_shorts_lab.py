@@ -398,3 +398,43 @@ def test_apify_token_validation(home, monkeypatch):
     import urllib.request as _ur
     monkeypatch.setattr(_ur, "urlopen", lambda req, timeout=20: FakeResp())
     assert meta_ads.validate_apify_token("t")["ok"] is True
+
+
+def test_apify_keyword_search_and_routing(home, monkeypatch):
+    monkeypatch.setenv("APIFY_API_TOKEN", "apify_api_x")
+    captured = {}
+
+    class FakeResp:
+        def __init__(self, payload):
+            self._p = payload
+
+        def read(self):
+            return json.dumps(self._p).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout=280):
+        captured["body"] = json.loads(req.data.decode())
+        return FakeResp([
+            {"pageID": "77", "pageName": "Lifestyle Founders Group"},
+            {"pageID": "77", "pageName": "Lifestyle Founders Group"},
+            {"pageID": "88", "pageName": "Other Brand"},
+        ])
+
+    import urllib.request as _ur
+    monkeypatch.setattr(_ur, "urlopen", fake_urlopen)
+
+    results = meta_ads.apify_search_pages("Lifestyle Founders Group")
+    assert "q=Lifestyle%20Founders%20Group" in \
+        captured["body"]["startUrls"][0]["url"]
+    assert results[0] == {"pageId": "77",
+                          "name": "Lifestyle Founders Group", "adCount": 2}
+
+    # source routing: apify key present -> keyword search goes via apify
+    assert meta_ads.get_ads_source() == "apify"
+    routed = meta_ads.search_pages_any("Lifestyle Founders Group")
+    assert routed[0]["pageId"] == "77"

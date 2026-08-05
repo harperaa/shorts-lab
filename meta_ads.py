@@ -332,6 +332,54 @@ def apify_pull_page_ads(page_id: str, limit: int = 50) -> tuple[list, int]:
     return items[:limit], new
 
 
+def apify_search_pages(term: str, limit: int = 50) -> list:
+    """Discover competitor pages by running the actor against an Ad
+    Library KEYWORD-SEARCH URL (the actor's docs accept search URLs as
+    startUrls). Aggregates results into the same page ranking the Meta
+    search returns. Sync runs take ~30-120s."""
+    token = _apify_token()
+    search_url = ("https://www.facebook.com/ads/library/?active_status=all"
+                  "&ad_type=all&country=US&q="
+                  + urllib.parse.quote(term.strip())
+                  + "&search_type=keyword_unordered")
+    body = json.dumps({"startUrls": [{"url": search_url}],
+                       "resultsLimit": min(limit, 100)}).encode()
+    url = (f"https://api.apify.com/v2/acts/{APIFY_ACTOR}"
+           "/run-sync-get-dataset-items?token="
+           + urllib.parse.quote(token) + "&timeout=240")
+    req = urllib.request.Request(
+        url, data=body, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=280) as resp:
+            items = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:200]
+        raise RuntimeError(f"Apify search failed (HTTP {exc.code}): {detail}")
+    if not isinstance(items, list):
+        raise RuntimeError(f"Apify returned no dataset: {str(items)[:200]}")
+    counts = Counter()
+    names = {}
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        pid = str(it.get("pageID") or it.get("pageId") or "")
+        if not pid:
+            continue
+        counts[pid] += 1
+        names.setdefault(pid, it.get("pageName") or pid)
+    return [{"pageId": pid, "name": names[pid], "adCount": n}
+            for pid, n in counts.most_common(20)]
+
+
+def search_pages_any(term: str) -> list:
+    src = get_ads_source()
+    if src == "apify":
+        return apify_search_pages(term)
+    if src == "meta":
+        return search_pages(term)
+    raise RuntimeError("connect Apify or Meta first")
+
+
 def get_ads_source() -> str:
     """Which backend pulls ads: explicit choice, else whichever key exists
     (apify preferred — it's the low-friction path)."""

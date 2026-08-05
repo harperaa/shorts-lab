@@ -229,7 +229,7 @@ def ads_search(body: AdsSearchBody):
     if not (body.term or "").strip():
         raise HTTPException(status_code=400, detail="search term required")
     try:
-        results = meta_ads.search_pages(body.term.strip())
+        results = meta_ads.search_pages_any(body.term.strip())
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc)[:300])
     return {"ok": True, "results": results}

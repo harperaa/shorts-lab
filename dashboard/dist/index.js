@@ -681,7 +681,7 @@
 
     function search() {
       if (busy) return;
-      if (!q.trim()) { setErr("Type a brand name (Meta token) — or paste an Ad Library URL / page id (works with any backend)."); return; }
+      if (!q.trim()) { setErr("Type a brand or keyword — or paste an Ad Library URL / page id."); return; }
       var pid = extractPageId(q);
       if (pid) {              // pasted page id or library URL — no API needed
         monitor(pid, "Page " + pid);
@@ -772,7 +772,10 @@
           }),
           h("button", { className: "sl-btn sl-btn-primary",
               disabled: busy !== null, onClick: search },
-            busy === "search" ? "Searching…" : "Search"),
+            busy === "search"
+              ? (st.adsSource === "apify" ? "Searching (Apify, ~1 min)…"
+                                          : "Searching…")
+              : "Search"),
           q.trim() && !extractPageId(q)
             ? h("a", { className: "sl-link", href: libTermUrl(q.trim()),
                 target: "_blank", rel: "noreferrer",
@@ -785,9 +788,9 @@
                                         : "the official Meta API") +
               ". You can also paste an Ad Library URL or page id to " +
               "monitor directly." +
-              (st.keys.meta ? " Name search uses the Meta token."
-                            : " Name search needs the Meta token — with " +
-                              "Apify, find pages via the ↗ links and paste.")
+              (st.adsSource === "apify"
+                ? " Name search runs the Apify actor too — expect ~30-90s."
+                : " Name search uses the Meta token.")
             : "No key needed to browse: hit ↗ to open the public Ad " +
               "Library, find the competitor's page, then paste its library " +
               "URL (or view_all_page_id number) here to monitor it. " +
