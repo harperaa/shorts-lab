@@ -564,6 +564,18 @@
     return null;
   }
 
+  var PLAT_BADGES = { FACEBOOK: "f", INSTAGRAM: "ig", MESSENGER: "ms",
+    AUDIENCE_NETWORK: "an", WHATSAPP: "wa", THREADS: "th" };
+  function platBadges(platforms) {
+    return h("span", { className: "sl-plats" },
+      (platforms || []).map(function (p, i) {
+        var key = String(p || "").toUpperCase();
+        return h("span", { key: i, className: "sl-plat",
+            title: key.toLowerCase().replace(/_/g, " ") },
+          PLAT_BADGES[key] || key.slice(0, 2).toLowerCase());
+      }));
+  }
+
   function extLink(href, label) {
     return h("a", { href: href, target: "_blank", rel: "noreferrer",
       className: "sl-link" }, label || href.replace(/^https?:\/\//, ""));
@@ -910,6 +922,25 @@
                   style: { padding: "0 12px" } },
                   "Started running " + when)
               : null,
+            (a.platforms || []).length || cr.impressions
+              ? h("div", { className: "sl-adcard-plats" },
+                  (a.platforms || []).length
+                    ? h(React.Fragment, null,
+                        h("span", { className: "sl-note",
+                            style: { fontSize: 11 } }, "Platforms"),
+                        platBadges(a.platforms))
+                    : null,
+                  cr.impressions
+                    ? (cr.impressions.indexOf("<") !== -1
+                        ? h("span", { className: "sl-lowimp",
+                            title: "Meta reports " + cr.impressions +
+                              " impressions for this ad" },
+                            "Low impression count")
+                        : h("span", { className: "sl-note",
+                            style: { fontSize: 11 } },
+                            "👁 " + cr.impressions + " impressions"))
+                    : null)
+              : null,
             h("div", { className: "sl-adcard-id" },
               cr.profile
                 ? h("img", { className: "sl-avatar", src: cr.profile,
@@ -971,9 +1002,7 @@
                     : null)
               : null,
             h("div", { className: "sl-adcard-foot" },
-              h("span", { className: "sl-note", style: { fontSize: 10.5,
-                  flex: 1 } },
-                (a.platforms || []).join(" · ").toLowerCase()),
+              h("span", { style: { flex: 1 } }),
               h("button", { className: "sl-btn", style: { fontSize: 11.5,
                   padding: "3px 10px" },
                   title: "Clone this winner's style with your own assets",

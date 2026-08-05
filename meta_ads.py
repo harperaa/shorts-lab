@@ -302,7 +302,7 @@ def _parse_any_date(v) -> Optional[float]:
     return _parse_day(str(v))
 
 
-def _extract_creative(it: dict) -> dict:
+def _extract_creative(it: dict) -> dict:   # noqa: C901 — flat shape walk
     """Pull the displayable creative out of the actor's snapshot blob —
     body text, title, CTA, media image, page avatar — defensively across
     the shapes the actor emits (snapshot.body.text, cards[], images[],
@@ -363,7 +363,13 @@ def _extract_creative(it: dict) -> dict:
                          "video_preview_image_url")
             video = bool(image)
 
+    imp = it.get("impressionsWithIndex") or it.get("impressions_with_index")
+    imp_text = ""
+    if isinstance(imp, dict):
+        imp_text = str(imp.get("impressionsText")
+                       or imp.get("impressions_text") or "")
     return {
+        "impressions": imp_text[:40],
         "body": str(body or "")[:2000],
         "title": str(pick(snap, "title") or pick(card0, "title"))[:200],
         "cta": str(pick(snap, "ctaText", "cta_text")

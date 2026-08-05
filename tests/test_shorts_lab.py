@@ -475,6 +475,8 @@ def test_apify_pull_stores_creative_and_requests_active(home, monkeypatch):
             "adArchiveID": "111", "pageID": "77", "pageName": "Acme",
             "startDate": 1735689600, "isActive": True,
             "publisherPlatform": ["FACEBOOK"],
+            "impressionsWithIndex": {"impressionsText": "<100",
+                                     "impressionsIndex": -1},
             "snapshot": {
                 "body": {"text": "You're technical. You know how systems work."},
                 "title": "Join the program", "ctaText": "Learn More",
@@ -495,3 +497,4 @@ def test_apify_pull_stores_creative_and_requests_active(home, monkeypatch):
     assert cr["image"] == "https://cdn/v.jpg" and cr["video"] is True
     assert cr["cta"] == "Learn More"
     assert cr["profile"] == "https://cdn/p.jpg"
+    assert cr["impressions"] == "<100"
