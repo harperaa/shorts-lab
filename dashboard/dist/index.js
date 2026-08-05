@@ -1080,7 +1080,13 @@
                       styleImage: cr.image || "",
                     });
                   } },
-                "🪄 Use in Ads Lab")));
+                h("svg", { width: 13, height: 13, viewBox: "0 0 24 24",
+                    fill: "currentColor",
+                    style: { marginRight: 5, verticalAlign: "-1px" } },
+                  h("path", { d: "M12 2l1.9 6.1L20 10l-6.1 1.9L12 18l-1.9" +
+                      "-6.1L4 10l6.1-1.9zM19 15l.9 2.6L22.5 18.5l-2.6.9" +
+                      "L19 22l-.9-2.6-2.6-.9 2.6-.9z" })),
+                "Use in Ads Lab")));
         }
         return h(React.Fragment, null,
           shown.length
