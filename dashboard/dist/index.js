@@ -635,14 +635,15 @@
                 style: { alignSelf: "center" } }, "Open in Ad Library ↗")
             : null),
         h("div", { className: "sl-note", style: { marginTop: 8 } },
-          "No Meta token? Browse the public Ad Library with the ↗ link, " +
-          "find the competitor's page, then paste the page's library URL " +
-          "(or its view_all_page_id number) here to monitor it."),
-        !st.keys.meta
-          ? h("div", { className: "sl-err", style: { marginTop: 8 } },
-              "META_ACCESS_TOKEN is not set — name search and ad pulls " +
-              "need it (Keys page). Browsing via ↗ links works without it.")
-          : null,
+          st.keys.meta
+            ? "Name search and automated pulls use your Meta token. You can " +
+              "also paste an Ad Library URL or page id to monitor directly."
+            : "No key needed to research: hit ↗ to browse the public Ad " +
+              "Library, find the competitor's page, then paste its library " +
+              "URL (or view_all_page_id number) here to monitor it. Adding " +
+              "META_ACCESS_TOKEN on the Keys page unlocks name search and " +
+              "pulling their ads into this tab (longest-running ranking)."),
+
         err ? h("div", { className: "sl-err" }, err) : null,
         results
           ? (results.length
@@ -686,7 +687,7 @@
                 "none yet — search above and hit 👁 Monitor")
             : null,
           h("span", { style: { flex: 1 } }),
-          (st.adPages || []).length
+          (st.adPages || []).length && st.keys.meta
             ? h("button", { className: "sl-btn sl-btn-primary",
                 disabled: busy !== null || !!sync.running, onClick: doSync },
                 sync.running ? "Syncing…" : "⟳ Sync ads")
@@ -705,7 +706,10 @@
           "a long run means it keeps paying — those are the ones to study")),
       (st.ads || []).length === 0
         ? h("div", { className: "sl-card sl-note" },
-            "No ads pulled yet — monitor a page and Sync.")
+            st.keys.meta
+              ? "No ads pulled yet — monitor a page and Sync."
+              : "Without a Meta token the ads stay on Meta's site — each " +
+                "monitored page above links straight to all of its ads.")
         : st.ads.slice(0, 80).map(function (a) {
             return h("div", { key: a.archive_id, className: "sl-card sl-ad" },
               h("span", { className: "sl-days" },

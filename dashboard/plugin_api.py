@@ -212,7 +212,10 @@ def ads_monitor(body: MonitorBody):
     if not (body.pageId or "").strip():
         raise HTTPException(status_code=400, detail="pageId required")
     store.add_ad_page(body.pageId.strip(), body.name or body.pageId)
-    _run_sync("adsSyncState", meta_ads.sync_all_pages)
+    # keyless monitoring is a bookmark to the public Ad Library — only kick
+    # the API pull when a token exists, so no-key users never see an error
+    if _has_key("META_ACCESS_TOKEN"):
+        _run_sync("adsSyncState", meta_ads.sync_all_pages)
     return {"ok": True, "state": _public_state()}
 
 
