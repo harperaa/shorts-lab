@@ -136,6 +136,36 @@ def ensure_job(kind: str) -> dict:
     return {"jobId": job["id"], "schedule": spec["schedule"]}
 
 
+def is_enabled() -> bool:
+    """Auto-sync is OPT-IN — off until the user flips the page toggle."""
+    return bool(store.kv_get("cronSyncEnabled"))
+
+
+def set_enabled(enabled: bool) -> dict:
+    """Flip both crons together. Enabling ensures both jobs (their scripts
+    no-op safely when a monitor type has nothing to sync); disabling turns
+    existing jobs off in place."""
+    store.kv_set("cronSyncEnabled", bool(enabled))
+    if enabled:
+        for kind in JOBS:
+            ensure_job(kind)
+        return {"enabled": True}
+    try:
+        from cron import jobs as cron_jobs
+        for kind, spec in JOBS.items():
+            saved = store.kv_get(f"cronJob:{kind}") or {}
+            job = None
+            if saved.get("jobId"):
+                job = cron_jobs.resolve_job_ref(saved["jobId"])
+            if job is None:
+                job = cron_jobs.resolve_job_ref(spec["name"])
+            if job is not None:
+                cron_jobs.update_job(job["id"], {"enabled": False})
+    except Exception:  # noqa: BLE001 — cron absent outside hermes
+        pass
+    return {"enabled": False}
+
+
 def ensure_ads_job() -> dict:
     return ensure_job("ads")
 

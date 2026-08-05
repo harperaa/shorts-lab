@@ -550,3 +550,43 @@ def test_twice_daily_sync_jobs_are_separate_and_idempotent(home, monkeypatch):
     # idempotent: re-ensure updates, never duplicates
     sync_job.ensure_ads_job()
     assert len(created) == 2 and updated
+
+
+def test_autosync_toggle_off_by_default_and_disables(home, monkeypatch):
+    import types
+    sync_job = importlib.import_module(f"{PKG}.sync_job")
+    assert sync_job.is_enabled() is False        # OFF by default
+
+    jobs_by_ref = {}
+    updates_log = []
+    fake_jobs = types.ModuleType("cron.jobs")
+    fake_jobs.resolve_job_ref = lambda ref: jobs_by_ref.get(ref)
+
+    def create_job(prompt, schedule, name=None, **kw):
+        job = {"id": "j-" + name, "name": name, "schedule": schedule,
+               "enabled": True}
+        jobs_by_ref[job["id"]] = job
+        jobs_by_ref[name] = job
+        return job
+
+    def update_job(job_id, updates):
+        jobs_by_ref[job_id].update(updates)
+        updates_log.append((job_id, updates))
+        return jobs_by_ref[job_id]
+
+    fake_jobs.create_job = create_job
+    fake_jobs.update_job = update_job
+    fake_cron = types.ModuleType("cron")
+    fake_cron.jobs = fake_jobs
+    monkeypatch.setitem(sys.modules, "cron", fake_cron)
+    monkeypatch.setitem(sys.modules, "cron.jobs", fake_jobs)
+
+    out = sync_job.set_enabled(True)
+    assert out["enabled"] is True and sync_job.is_enabled() is True
+    assert "j-shorts-lab-ads-sync" in jobs_by_ref
+    assert "j-shorts-lab-shorts-sync" in jobs_by_ref
+
+    out = sync_job.set_enabled(False)
+    assert out["enabled"] is False and sync_job.is_enabled() is False
+    disabled = [u for _, u in updates_log if u.get("enabled") is False]
+    assert len(disabled) == 2                    # both crons turned off

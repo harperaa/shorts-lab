@@ -130,6 +130,7 @@ def _public_state() -> dict:
             "kie": _has_key("KIE_API_KEY"),
         },
         "adsSource": meta_ads.get_ads_source(),
+        "autoSync": sync_job.is_enabled(),
     }
 
 
@@ -150,13 +151,27 @@ def channels(body: ChannelBody):
             store.remove_channel(body.handle)
         else:
             store.add_channel(body.handle)
-            # tracked channels get the twice-daily shorts refresh
+            # with auto-sync enabled, tracked channels join the cron
             try:
-                sync_job.ensure_shorts_job()
+                if sync_job.is_enabled():
+                    sync_job.ensure_shorts_job()
             except Exception:  # noqa: BLE001 — cron absent outside hermes
                 pass
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, "state": _public_state()}
+
+
+class AutoSyncBody(BaseModel):
+    enabled: bool = False
+
+
+@router.post("/autosync")
+def autosync(body: AutoSyncBody):
+    try:
+        sync_job.set_enabled(bool(body.enabled))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)[:200])
     return {"ok": True, "state": _public_state()}
 
 
@@ -251,9 +266,10 @@ def ads_monitor(body: MonitorBody):
     if not (body.pageId or "").strip():
         raise HTTPException(status_code=400, detail="pageId required")
     store.add_ad_page(body.pageId.strip(), body.name or body.pageId)
-    # a monitor implies ongoing interest — twice-daily cron keeps it fresh
+    # with auto-sync enabled, a new monitor joins the twice-daily cron
     try:
-        sync_job.ensure_ads_job()
+        if sync_job.is_enabled():
+            sync_job.ensure_ads_job()
     except Exception:  # noqa: BLE001 — cron absent outside hermes (tests)
         pass
     # keyless monitoring is a bookmark to the public Ad Library — only kick
