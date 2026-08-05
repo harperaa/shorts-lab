@@ -230,9 +230,7 @@
 .sl-adcard-media { position: relative; }
 .sl-adcard-media img { width: 100%; aspect-ratio: 1/1; object-fit: cover;
   display: block; background: var(--color-secondary, #13131f); }
-.sl-play { position: absolute; inset: 0; display: flex; align-items: center;
-  justify-content: center; font-size: 34px; color: #fff;
-  text-shadow: 0 2px 12px rgba(0,0,0,0.7); pointer-events: none; }
+
 .sl-adcard-cta { display: flex; align-items: center; gap: 8px;
   padding: 0 12px; }
 .sl-adcard-foot { display: flex; align-items: center; gap: 8px;
@@ -249,7 +247,8 @@
 .sl-play { position: absolute; inset: 0; display: flex; align-items: center;
   justify-content: center; font-size: 34px; color: #fff;
   text-shadow: 0 2px 12px rgba(0,0,0,0.7); background: none; border: none;
-  cursor: pointer; }
+  cursor: pointer; pointer-events: auto; }
+.sl-play:hover { color: var(--color-primary, #14b8a6); }
 
 .sl-adcard-plats { display: flex; align-items: center; gap: 8px;
   padding: 0 12px; flex-wrap: wrap; }
