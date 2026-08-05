@@ -477,10 +477,10 @@ def test_apify_pull_stores_creative_and_requests_active(home, monkeypatch):
             "publisherPlatform": ["FACEBOOK"],
             "snapshot": {
                 "body": {"text": "You're technical. You know how systems work."},
-                "title": "Join the program", "cta_text": "Learn More",
-                "videos": [{"video_preview_image_url": "https://cdn/v.jpg"}],
-                "page_profile_picture_url": "https://cdn/p.jpg",
-                "link_url": "https://example.com"},
+                "title": "Join the program", "ctaText": "Learn More",
+                "videos": [{"videoPreviewImageUrl": "https://cdn/v.jpg"}],
+                "pageProfilePictureUrl": "https://cdn/p.jpg",
+                "linkUrl": "https://example.com"},
         }])
 
     import urllib.request as _ur

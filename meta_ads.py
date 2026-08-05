@@ -313,6 +313,15 @@ def _extract_creative(it: dict) -> dict:
     cards = snap.get("cards") or []
     card0 = cards[0] if cards and isinstance(cards[0], dict) else {}
 
+    def pick(obj, *keys):
+        # the actor emits camelCase in practice; its docs show snake_case —
+        # accept both (verified against a live run, 2026-08-05)
+        for k in keys:
+            v = obj.get(k)
+            if v:
+                return v
+        return ""
+
     body = snap.get("body")
     if isinstance(body, dict):
         body = body.get("text")
@@ -324,32 +333,37 @@ def _extract_creative(it: dict) -> dict:
     video = False
     for img in (snap.get("images") or []):
         if isinstance(img, dict):
-            image = (img.get("original_image_url")
-                     or img.get("resized_image_url") or "")
+            image = pick(img, "originalImageUrl", "original_image_url",
+                         "resizedImageUrl", "resized_image_url")
             if image:
                 break
     if not image:
         for vid in (snap.get("videos") or []):
             if isinstance(vid, dict):
-                image = vid.get("video_preview_image_url") or ""
+                image = pick(vid, "videoPreviewImageUrl",
+                             "video_preview_image_url")
                 if image:
                     video = True
                     break
     if not image:
-        image = (card0.get("original_image_url")
-                 or card0.get("resized_image_url") or "")
-        if not image and card0.get("video_preview_image_url"):
-            image = card0["video_preview_image_url"]
-            video = True
+        image = pick(card0, "originalImageUrl", "original_image_url",
+                     "resizedImageUrl", "resized_image_url")
+        if not image:
+            image = pick(card0, "videoPreviewImageUrl",
+                         "video_preview_image_url")
+            video = bool(image)
 
     return {
         "body": str(body or "")[:600],
-        "title": str(snap.get("title") or card0.get("title") or "")[:200],
-        "cta": str(snap.get("cta_text") or card0.get("cta_text") or "")[:60],
+        "title": str(pick(snap, "title") or pick(card0, "title"))[:200],
+        "cta": str(pick(snap, "ctaText", "cta_text")
+                   or pick(card0, "ctaText", "cta_text"))[:60],
         "image": str(image or "")[:1000],
         "video": video,
-        "profile": str(snap.get("page_profile_picture_url") or "")[:1000],
-        "link": str(snap.get("link_url") or card0.get("link_url") or "")[:600],
+        "profile": str(pick(snap, "pageProfilePictureUrl",
+                            "page_profile_picture_url"))[:1000],
+        "link": str(pick(snap, "linkUrl", "link_url")
+                    or pick(card0, "linkUrl", "link_url"))[:600],
     }
 
 

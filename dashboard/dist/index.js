@@ -945,7 +945,7 @@
                       (cr.cta ? " CTA: " + cr.cta : "") +
                       ". Snapshot: " + a.snapshot_url);
                   } },
-                "🎨 Use in Ads Lab")));
+                "🪄 Use in Ads Lab")));
         }
         return h(React.Fragment, null,
           shown.length
@@ -1081,7 +1081,7 @@
         }),
         h("textarea", {
           className: "sl-input", rows: 2, style: { marginTop: 8 },
-          placeholder: "The winning ad you're cloning — filled automatically from 🎨 Use in Ads Lab, or describe it (layout, text, vibe)…",
+          placeholder: "The winning ad you're cloning — filled automatically from 🪄 Use in Ads Lab, or describe it (layout, text, vibe)…",
           value: adContext,
           onChange: function (e) { setAdContext(e.target.value); },
         }),
