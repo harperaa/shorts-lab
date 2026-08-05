@@ -1408,15 +1408,17 @@
           h("span", { style: { flex: 1 } }),
           h("button", {
               className: "sl-tab" + (st.autoSync ? " sl-tab-on" : ""),
-              style: { fontSize: 12, alignSelf: "center", marginBottom: 4 },
-              title: "Twice-daily background sync of monitored ads and " +
-                "tracked competitor shorts (two zero-LLM cron jobs)",
+              style: { fontSize: 13.5, padding: "8px 18px",
+                       alignSelf: "center", marginBottom: 4 },
+              title: "Background sync of monitored ads and tracked " +
+                "competitor shorts. Adjust the schedule on the Cron tab.",
               onClick: function () {
                 postJSON("/autosync", { enabled: !st.autoSync })
                   .then(function (r) { setSt(r.state); })
                   .catch(function () {});
               },
-            }, "⏰ Auto-sync " + (st.autoSync ? "on" : "off"))),
+            }, "⏰ Auto-sync (twice a day) " +
+               (st.autoSync ? "on" : "off"))),
         err ? h("div", { className: "sl-err" }, err) : null,
         tab === "research"
           ? h(ShortsResearchTab, { st: st, onState: setSt,
