@@ -1396,7 +1396,7 @@
             "AI Cyber Value Creator™"),
           h("h1", { style: { fontSize: 30, margin: "4px 0 6px",
                              fontWeight: 800 } },
-            "🎬 Short Form")),
+            "⚡ Short Form")),
         h("div", { className: "sl-tabs" },
           TABS.map(function (t) {
             return h("button", {
