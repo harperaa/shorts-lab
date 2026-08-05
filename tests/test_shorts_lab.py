@@ -331,3 +331,70 @@ def test_store_key_and_validate_token(home, monkeypatch):
     assert meta_ads.validate_token("good") == {"ok": True, "name": "Allen"}
     bad = meta_ads.validate_token("bad")
     assert bad["ok"] is False and "Invalid" in bad["error"]
+
+
+def test_apify_pull_normalizes_and_source_routing(home, monkeypatch):
+    monkeypatch.setenv("APIFY_API_TOKEN", "apify_api_x")
+    captured = {}
+
+    class FakeResp:
+        def __init__(self, payload):
+            self._p = payload
+
+        def read(self):
+            return json.dumps(self._p).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout=280):
+        captured["url"] = req.full_url
+        captured["body"] = json.loads(req.data.decode())
+        return FakeResp([
+            {"adArchiveID": "111", "pageID": "77", "pageName": "Acme",
+             "startDate": 1735689600, "endDate": None, "isActive": True,
+             "publisherPlatform": ["FACEBOOK"]},
+            {"adArchiveId": "222", "pageId": "77", "pageName": "Acme",
+             "startDate": "2026-06-01", "endDate": "2026-06-20",
+             "isActive": False, "publisherPlatform": ["INSTAGRAM"]},
+        ])
+
+    import urllib.request as _ur
+    monkeypatch.setattr(_ur, "urlopen", fake_urlopen)
+
+    items, new = meta_ads.apify_pull_page_ads("77", limit=10)
+    assert len(items) == 2 and new == 2
+    assert "acts/apify~facebook-ads-scraper/run-sync-get-dataset-items" \
+        in captured["url"]
+    assert "view_all_page_id=77" in captured["body"]["startUrls"][0]["url"]
+
+    stored = {a["archive_id"]: a for a in store.list_ads()}
+    assert stored["111"]["active"] == 1
+    assert stored["111"]["snapshot_url"].endswith("?id=111")
+    assert stored["222"]["active"] == 0 and stored["222"]["daysRunning"] == 19
+
+    # source routing: apify key present -> apify; explicit choice wins
+    assert meta_ads.get_ads_source() == "apify"
+    meta_ads.set_ads_source("meta")
+    assert meta_ads.get_ads_source() == "meta"
+    with pytest.raises(ValueError):
+        meta_ads.set_ads_source("bogus")
+
+
+def test_apify_token_validation(home, monkeypatch):
+    class FakeResp:
+        def read(self):
+            return json.dumps({"data": {"username": "allen"}}).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    import urllib.request as _ur
+    monkeypatch.setattr(_ur, "urlopen", lambda req, timeout=20: FakeResp())
+    assert meta_ads.validate_apify_token("t")["ok"] is True

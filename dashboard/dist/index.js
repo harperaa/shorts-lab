@@ -564,36 +564,76 @@
     return null;
   }
 
-  var META_STEPS =
-    "Get a LIMITED, read-only Meta API token (~5 minutes):\n\n" +
-    "1. Go to developers.facebook.com/apps and Create App\n" +
-    "   (type: Other -> Business — no review needed for this).\n" +
-    "2. Open Tools -> Graph API Explorer\n" +
-    "   (developers.facebook.com/tools/explorer).\n" +
-    "3. Pick your new app in the Application dropdown.\n" +
-    "4. Under Permissions add ONLY ads_read — read-only, scoped to ad\n" +
-    "   accounts you can already see. Never grant ads_management for\n" +
-    "   this; researching the public Ad Library never needs write access.\n" +
-    "5. Click Generate Access Token and log in.\n" +
-    "6. Make it long-lived (~60 days): open the Access Token Debugger\n" +
-    "   (developers.facebook.com/tools/debug/accesstoken), paste the\n" +
-    "   token, hit 'Extend Access Token', and copy the extended token.\n" +
-    "7. Paste it below — it's stored in your instance's env only.\n\n" +
-    "Note: tokens expire (~60 days) — when pulls start failing, repeat\n" +
-    "steps 5-7 with the same app.";
+  function extLink(href, label) {
+    return h("a", { href: href, target: "_blank", rel: "noreferrer",
+      className: "sl-link" }, label || href.replace(/^https?:\/\//, ""));
+  }
 
-  function ConnectMetaModal(props) {
+  // Steps verified against the live consoles, Aug 2026.
+  function ApifySteps() {
+    return h("ol", { className: "sl-list", style: { fontSize: 13 } },
+      h("li", null, "Create a free Apify account at ",
+        extLink("https://apify.com", "apify.com"),
+        " — the free plan includes monthly platform credit; no Meta " +
+        "account or app review involved."),
+      h("li", null, "Open ",
+        extLink("https://console.apify.com/settings/integrations",
+          "Console → Settings → API & Integrations"),
+        " and copy your Personal API token."),
+      h("li", null, "Paste it below. Pulls run the official ",
+        extLink("https://apify.com/apify/facebook-ads-scraper",
+          "Facebook Ads Library Scraper"),
+        " actor against each monitored page's public Ad Library — " +
+        "pay-per-result, a few cents per sync."));
+  }
+
+  function MetaSteps() {
+    return h("ol", { className: "sl-list", style: { fontSize: 13 } },
+      h("li", null, "Heads-up: Meta's official Ad Library API is the " +
+        "heavyweight path — it requires a business-linked account and " +
+        "app review. If you just want competitor ads, Connect Apify " +
+        "instead (2 minutes)."),
+      h("li", null, "Create an app of type Business at ",
+        extLink("https://developers.facebook.com/apps",
+          "developers.facebook.com/apps"), "."),
+      h("li", null, "In App Review → Permissions and Features, request ",
+        h("b", null, "ads_read"),
+        " (written use case + data-handling notes; review typically " +
+        "takes 5–10 business days) and complete ",
+        extLink("https://business.facebook.com/settings/security",
+          "Business Verification"), "."),
+      h("li", null, "Accept the Ad Library API terms at ",
+        extLink("https://www.facebook.com/ads/library/api",
+          "facebook.com/ads/library/api"), "."),
+      h("li", null, "In the ",
+        extLink("https://developers.facebook.com/tools/explorer",
+          "Graph API Explorer"),
+        ", pick your app, add the ads_read permission, and click " +
+        "Generate Access Token."),
+      h("li", null, "Extend it to long-lived (~60 days) in the ",
+        extLink("https://developers.facebook.com/tools/debug/accesstoken",
+          "Access Token Debugger"),
+        " ('Extend Access Token'), then paste the extended token below."),
+      h("li", null, "Tokens expire in ~60 days — repeat the last two " +
+        "steps to renew."));
+  }
+
+  function ConnectModal(props) {
     var keySt = useState("");
     var keyVal = keySt[0], setKeyVal = keySt[1];
     var busySt = useState(false);
     var busy = busySt[0], setBusy = busySt[1];
     var errSt = useState(null);
     var err = errSt[0], setErr = errSt[1];
+    var isApify = props.kind === "apify";
 
     function save() {
       if (!keyVal.trim() || busy) return;
       setBusy(true); setErr(null);
-      postJSON("/connect", { env: "META_ACCESS_TOKEN", key: keyVal.trim() })
+      postJSON("/connect", {
+        env: isApify ? "APIFY_API_TOKEN" : "META_ACCESS_TOKEN",
+        key: keyVal.trim(),
+      })
         .then(function (r) { props.onState(r.state); props.onClose(); })
         .catch(function (e) { setErr(String((e && e.message) || e)); })
         .finally(function () { setBusy(false); });
@@ -604,12 +644,13 @@
         } },
       h("div", { className: "sl-modal-box" },
         h("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 8 } },
-          "🔗 Connect Meta (read-only)"),
-        h("pre", { className: "sl-md", style: { maxHeight: "40vh",
-            marginTop: 0 } }, META_STEPS),
+          isApify ? "🔗 Connect Apify (easy path)"
+                  : "🔗 Connect Meta (official API)"),
+        isApify ? h(ApifySteps) : h(MetaSteps),
         h("input", {
           className: "sl-input", type: "password", autoFocus: true,
-          placeholder: "Paste the long-lived token (EAAB…)",
+          placeholder: isApify ? "Paste your Apify API token (apify_api_…)"
+                               : "Paste the long-lived token (EAAB…)",
           value: keyVal, style: { marginTop: 10 },
           onChange: function (e) { setKeyVal(e.target.value); },
           onKeyDown: function (e) { if (e.key === "Enter") save(); },
@@ -640,7 +681,7 @@
 
     function search() {
       if (busy) return;
-      if (!q.trim()) { setErr("Type a brand name — or paste an Ad Library URL / page id."); return; }
+      if (!q.trim()) { setErr("Type a brand name (Meta token) — or paste an Ad Library URL / page id (works with any backend)."); return; }
       var pid = extractPageId(q);
       if (pid) {              // pasted page id or library URL — no API needed
         monitor(pid, "Page " + pid);
@@ -684,6 +725,19 @@
             "🔎 Find competitors in the Meta Ad Library"),
           h("button", {
               className: "sl-tag",
+              style: st.keys.apify
+                ? { color: "var(--color-primary, #14b8a6)",
+                    borderColor: "color-mix(in srgb, var(--color-primary, #14b8a6) 60%, transparent)",
+                    cursor: "pointer" }
+                : { cursor: "pointer" },
+              title: st.keys.apify
+                ? "Apify connected — click to replace the token"
+                : "2-minute signup, scrapes the public Ad Library — the easy path",
+              onClick: function () { setShowConnect("apify"); },
+            }, st.keys.apify ? "✓ Apify connected" : "🔗 Connect Apify"),
+          h("span", { className: "sl-note" }, "or"),
+          h("button", {
+              className: "sl-tag",
               style: st.keys.meta
                 ? { color: "var(--color-primary, #14b8a6)",
                     borderColor: "color-mix(in srgb, var(--color-primary, #14b8a6) 60%, transparent)",
@@ -691,9 +745,24 @@
                 : { cursor: "pointer" },
               title: st.keys.meta
                 ? "Meta connected — click to replace the token"
-                : "Get a limited read-only token and paste it here",
-              onClick: function () { setShowConnect(true); },
-            }, st.keys.meta ? "✓ Meta connected" : "🔗 Connect Meta")),
+                : "The official API — business verification + app review required",
+              onClick: function () { setShowConnect("meta"); },
+            }, st.keys.meta ? "✓ Meta connected" : "🔗 Connect Meta"),
+          st.keys.apify && st.keys.meta
+            ? h("span", { style: { display: "inline-flex", gap: 4 } },
+                [["apify", "Apify"], ["meta", "Meta"]].map(function (o) {
+                  return h("button", { key: o[0],
+                    className: "sl-tab" +
+                      (st.adsSource === o[0] ? " sl-tab-on" : ""),
+                    style: { fontSize: 11, padding: "3px 10px" },
+                    title: "Pull ads via " + o[1],
+                    onClick: function () {
+                      postJSON("/ads/source", { source: o[0] })
+                        .then(function (r) { props.onState(r.state); })
+                        .catch(function () {});
+                    } }, o[1]);
+                }))
+            : null),
         h("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
           h("input", {
             className: "sl-input", style: { maxWidth: 360 },
@@ -710,14 +779,20 @@
                 style: { alignSelf: "center" } }, "Open in Ad Library ↗")
             : null),
         h("div", { className: "sl-note", style: { marginTop: 8 } },
-          st.keys.meta
-            ? "Name search and automated pulls use your Meta token. You can " +
-              "also paste an Ad Library URL or page id to monitor directly."
-            : "No key needed to research: hit ↗ to browse the public Ad " +
+          (st.keys.meta || st.keys.apify)
+            ? "Pulls run via " +
+              (st.adsSource === "apify" ? "Apify (public Ad Library scrape)"
+                                        : "the official Meta API") +
+              ". You can also paste an Ad Library URL or page id to " +
+              "monitor directly." +
+              (st.keys.meta ? " Name search uses the Meta token."
+                            : " Name search needs the Meta token — with " +
+                              "Apify, find pages via the ↗ links and paste.")
+            : "No key needed to browse: hit ↗ to open the public Ad " +
               "Library, find the competitor's page, then paste its library " +
-              "URL (or view_all_page_id number) here to monitor it. Adding " +
-              "META_ACCESS_TOKEN on the Keys page unlocks name search and " +
-              "pulling their ads into this tab (longest-running ranking)."),
+              "URL (or view_all_page_id number) here to monitor it. " +
+              "Connect Apify (2 minutes) or Meta above to pull their ads " +
+              "into this tab with longest-running ranking."),
 
         err ? h("div", { className: "sl-err" }, err) : null,
         results
@@ -744,7 +819,7 @@
           : null),
 
       showConnect
-        ? h(ConnectMetaModal, { onState: props.onState,
+        ? h(ConnectModal, { kind: showConnect, onState: props.onState,
             onClose: function () { setShowConnect(false); } })
         : null,
       h("div", { className: "sl-card" },
@@ -766,8 +841,10 @@
                 "none yet — search above and hit 👁 Monitor")
             : null,
           h("span", { style: { flex: 1 } }),
-          (st.adPages || []).length && st.keys.meta
+          (st.adPages || []).length && (st.keys.meta || st.keys.apify)
             ? h("button", { className: "sl-btn sl-btn-primary",
+                title: "Pull ads via " +
+                  (st.adsSource === "apify" ? "Apify" : "the Meta API"),
                 disabled: busy !== null || !!sync.running, onClick: doSync },
                 sync.running ? "Syncing…" : "⟳ Sync ads")
             : null,
@@ -785,9 +862,9 @@
           "a long run means it keeps paying — those are the ones to study")),
       (st.ads || []).length === 0
         ? h("div", { className: "sl-card sl-note" },
-            st.keys.meta
+            (st.keys.meta || st.keys.apify)
               ? "No ads pulled yet — monitor a page and Sync."
-              : "Without a Meta token the ads stay on Meta's site — each " +
+              : "Connect Apify or Meta to pull ads in — until then, each " +
                 "monitored page above links straight to all of its ads.")
         : st.ads.slice(0, 80).map(function (a) {
             return h("div", { key: a.archive_id, className: "sl-card sl-ad" },

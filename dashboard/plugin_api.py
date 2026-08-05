@@ -125,8 +125,10 @@ def _public_state() -> dict:
         "keys": {
             "transcript": _has_key("TRANSCRIPT_API_KEY"),
             "meta": _has_key("META_ACCESS_TOKEN"),
+            "apify": _has_key("APIFY_API_TOKEN"),
             "kie": _has_key("KIE_API_KEY"),
         },
+        "adsSource": meta_ads.get_ads_source(),
     }
 
 
@@ -205,6 +207,12 @@ def connect(body: ConnectBody):
             raise HTTPException(
                 status_code=400,
                 detail=f"Meta rejected the token: {check.get('error')}")
+    elif body.env == "APIFY_API_TOKEN":
+        check = meta_ads.validate_apify_token(key)
+        if not check.get("ok"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Apify rejected the token: {check.get('error')}")
     try:
         meta_ads.store_key(body.env, key)
     except ValueError as exc:
@@ -238,8 +246,8 @@ def ads_monitor(body: MonitorBody):
         raise HTTPException(status_code=400, detail="pageId required")
     store.add_ad_page(body.pageId.strip(), body.name or body.pageId)
     # keyless monitoring is a bookmark to the public Ad Library — only kick
-    # the API pull when a token exists, so no-key users never see an error
-    if _has_key("META_ACCESS_TOKEN"):
+    # a pull when a data backend exists, so no-key users never see an error
+    if _has_key("APIFY_API_TOKEN") or _has_key("META_ACCESS_TOKEN"):
         _run_sync("adsSyncState", meta_ads.sync_all_pages)
     return {"ok": True, "state": _public_state()}
 
@@ -247,6 +255,19 @@ def ads_monitor(body: MonitorBody):
 @router.post("/ads/unmonitor")
 def ads_unmonitor(body: MonitorBody):
     store.remove_ad_page((body.pageId or "").strip())
+    return {"ok": True, "state": _public_state()}
+
+
+class SourceBody(BaseModel):
+    source: str = ""
+
+
+@router.post("/ads/source")
+def ads_source(body: SourceBody):
+    try:
+        meta_ads.set_ads_source((body.source or "").strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True, "state": _public_state()}
 
 

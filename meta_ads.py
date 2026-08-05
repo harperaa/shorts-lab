@@ -172,12 +172,13 @@ def pull_page_ads(page_id: str, countries: str = "US", days: int = 365,
 
 
 def sync_all_pages(countries: str = "US") -> dict:
-    """Refresh ads for every monitored page."""
+    """Refresh ads for every monitored page via the selected backend."""
     pages = store.list_ad_pages()
-    summary = {"pages": len(pages), "ads": 0, "new": 0, "errors": []}
+    summary = {"pages": len(pages), "ads": 0, "new": 0, "errors": [],
+               "source": get_ads_source()}
     for p in pages:
         try:
-            ads, new = pull_page_ads(p["page_id"], countries=countries)
+            ads, new = pull_page_ads_any(p["page_id"])
             summary["ads"] += len(ads)
             summary["new"] += new
         except Exception as exc:  # noqa: BLE001
@@ -187,7 +188,8 @@ def sync_all_pages(countries: str = "US") -> dict:
     return summary
 
 
-_ALLOWED_KEYS = {"META_ACCESS_TOKEN", "KIE_API_KEY", "TRANSCRIPT_API_KEY"}
+_ALLOWED_KEYS = {"META_ACCESS_TOKEN", "KIE_API_KEY", "TRANSCRIPT_API_KEY",
+                 "APIFY_API_TOKEN"}
 
 
 def store_key(env_var: str, value: str) -> None:
@@ -223,3 +225,147 @@ def validate_token(token: str) -> dict:
         return {"ok": False,
                 "error": str(data["error"].get("message", "invalid token"))[:200]}
     return {"ok": True, "name": data.get("name") or data.get("id") or ""}
+
+
+# ---------------------------------------------------------------------------
+# Apify backend — scrape the PUBLIC Ad Library via the official Apify actor
+# (apify/facebook-ads-scraper). No Meta account, no app review: an Apify
+# token is a 2-minute signup. Verified 2026-08: input takes startUrls of
+# Ad Library pages; output items carry adArchiveID/startDate/endDate/
+# isActive/publisherPlatform/pageName.
+# ---------------------------------------------------------------------------
+
+APIFY_ACTOR = "apify~facebook-ads-scraper"
+
+
+def _apify_token() -> str:
+    import os as _os
+    tok = (_os.environ.get("APIFY_API_TOKEN") or "").strip()
+    if not tok:
+        try:
+            for line in (store._home() / ".env").read_text().splitlines():
+                if line.strip().startswith("APIFY_API_TOKEN="):
+                    tok = line.split("=", 1)[1].strip()
+                    break
+        except OSError:
+            pass
+    if not tok:
+        raise RuntimeError("APIFY_API_TOKEN not set — hit Connect Apify")
+    return tok
+
+
+def validate_apify_token(token: str) -> dict:
+    """Cheapest sanity check: GET /v2/users/me."""
+    url = ("https://api.apify.com/v2/users/me?token="
+           + urllib.parse.quote((token or "").strip()))
+    try:
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode())
+        u = (data.get("data") or {})
+        if u.get("username") or u.get("id"):
+            return {"ok": True, "name": u.get("username") or u.get("id")}
+        return {"ok": False, "error": "unexpected response"}
+    except urllib.error.HTTPError as exc:
+        return {"ok": False, "error": f"HTTP {exc.code} — token rejected"}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)[:150]}
+
+
+def _parse_any_date(v) -> Optional[float]:
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):        # actor sometimes emits unix secs
+        return float(v) if v > 10_000 else None
+    return _parse_day(str(v))
+
+
+def apify_pull_page_ads(page_id: str, limit: int = 50) -> tuple[list, int]:
+    """Run the actor synchronously for one page's Ad Library URL and
+    upsert the results. Sync runs take ~30-120s."""
+    token = _apify_token()
+    lib_url = ("https://www.facebook.com/ads/library/?active_status=all"
+               "&ad_type=all&country=US&search_type=page"
+               f"&view_all_page_id={page_id}")
+    body = json.dumps({
+        "startUrls": [{"url": lib_url}],
+        "resultsLimit": min(limit, 100),
+    }).encode()
+    url = (f"https://api.apify.com/v2/acts/{APIFY_ACTOR}"
+           "/run-sync-get-dataset-items?token="
+           + urllib.parse.quote(token) + "&timeout=240")
+    req = urllib.request.Request(
+        url, data=body, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=280) as resp:
+            items = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:200]
+        raise RuntimeError(f"Apify run failed (HTTP {exc.code}): {detail}")
+    if not isinstance(items, list):
+        raise RuntimeError(f"Apify returned no dataset: {str(items)[:200]}")
+
+    new = 0
+    page_name = ""
+    for it in items[:limit]:
+        aid = str(it.get("adArchiveID") or it.get("adArchiveId")
+                  or it.get("ad_archive_id") or "")
+        if not aid:
+            continue
+        page_name = it.get("pageName") or page_name
+        started = _parse_any_date(it.get("startDate")
+                                  or it.get("startDateFormatted"))
+        stopped = _parse_any_date(it.get("endDate")
+                                  or it.get("endDateFormatted"))
+        active = bool(it.get("isActive"))
+        if active:
+            stopped = None
+        created = store.upsert_ad(
+            aid, str(it.get("pageID") or it.get("pageId") or page_id),
+            it.get("pageName") or "",
+            f"https://www.facebook.com/ads/library/?id={aid}",
+            started, stopped, active,
+            it.get("publisherPlatform") or it.get("publisherPlatforms") or [])
+        new += 1 if created else 0
+    if page_name:
+        store.add_ad_page(str(page_id), page_name)
+    return items[:limit], new
+
+
+def get_ads_source() -> str:
+    """Which backend pulls ads: explicit choice, else whichever key exists
+    (apify preferred — it's the low-friction path)."""
+    import os as _os
+    choice = store.kv_get("adsSource")
+    def _has(var):
+        if (_os.environ.get(var) or "").strip():
+            return True
+        try:
+            for line in (store._home() / ".env").read_text().splitlines():
+                if line.strip().startswith(var + "=") and                         line.split("=", 1)[1].strip():
+                    return True
+        except OSError:
+            pass
+        return False
+    if choice in ("meta", "apify"):
+        return choice
+    if _has("APIFY_API_TOKEN"):
+        return "apify"
+    if _has("META_ACCESS_TOKEN"):
+        return "meta"
+    return "none"
+
+
+def set_ads_source(source: str) -> None:
+    if source not in ("meta", "apify"):
+        raise ValueError("source must be meta or apify")
+    store.kv_set("adsSource", source)
+
+
+def pull_page_ads_any(page_id: str, limit: int = 50):
+    src = get_ads_source()
+    if src == "apify":
+        return apify_pull_page_ads(page_id, limit=limit)
+    if src == "meta":
+        return pull_page_ads(page_id, limit=limit)
+    raise RuntimeError("connect Apify or Meta first")
