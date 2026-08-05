@@ -564,15 +564,60 @@
     return null;
   }
 
-  var PLAT_BADGES = { FACEBOOK: "f", INSTAGRAM: "ig", MESSENGER: "ms",
-    AUDIENCE_NETWORK: "an", WHATSAPP: "wa", THREADS: "th" };
+  // brand-mark platform icons, inline SVG (no external assets) — the same
+  // row the Ad Library shows under "Platforms"
+  function platIcon(key, i) {
+    var S = { width: 18, height: 18, viewBox: "0 0 24 24", key: i };
+    var title = key.toLowerCase().replace(/_/g, " ");
+    function wrap(bg, children) {
+      return h("svg", Object.assign({}, S, { style: { display: "block" } }),
+        h("title", null, title),
+        h("circle", { cx: 12, cy: 12, r: 12, fill: bg }),
+        children);
+    }
+    if (key === "FACEBOOK") {
+      return wrap("#1877F2",
+        h("path", { fill: "#fff",
+          d: "M13.4 21v-6.9h2.3l.35-2.7h-2.65V9.6c0-.78.22-1.31 1.34-1.31" +
+             "h1.43V5.9c-.25-.03-1.1-.11-2.09-.11-2.07 0-3.48 1.26-3.48 " +
+             "3.58v2h-2.33v2.7h2.33V21z" }));
+    }
+    if (key === "INSTAGRAM") {
+      return wrap("#E4405F", h("g", { stroke: "#fff", fill: "none",
+          strokeWidth: 1.6 },
+        h("rect", { x: 6.6, y: 6.6, width: 10.8, height: 10.8, rx: 3.4 }),
+        h("circle", { cx: 12, cy: 12, r: 2.7 }),
+        h("circle", { cx: 15.6, cy: 8.4, r: 0.4, fill: "#fff" })));
+    }
+    if (key === "MESSENGER") {
+      return wrap("#0084FF",
+        h("path", { fill: "#fff",
+          d: "M6.2 14.6l4.1-4.4 2.2 2.1 5.3-2.9-4.1 4.4-2.2-2.1z" }));
+    }
+    if (key === "WHATSAPP") {
+      return wrap("#25D366",
+        h("path", { fill: "#fff",
+          d: "M8.6 7.2c.35-.8 1.55-1 2-.3l.85 1.4c.24.4.1.9-.25 1.2l-.6." +
+             "55c.55 1.15 1.5 2.1 2.65 2.65l.55-.6c.3-.35.8-.5 1.2-.25l1" +
+             ".4.85c.7.45.5 1.65-.3 2-.95.4-2.2.3-3.85-.65-1.7-1-2.85-2." +
+             "15-3.6-3.85-.5-1.15-.4-2.1-.05-3z" }));
+    }
+    if (key === "THREADS") {
+      return wrap("#000",
+        h("text", { x: 12, y: 16.4, textAnchor: "middle", fontSize: 12.5,
+            fill: "#fff", fontWeight: 700, fontFamily: "inherit" }, "@"));
+    }
+    // Audience Network (and anything new Meta adds)
+    return wrap("#0668E1",
+      h("text", { x: 12, y: 15.8, textAnchor: "middle", fontSize: 8,
+          fill: "#fff", fontWeight: 800,
+          fontFamily: "inherit" },
+        key === "AUDIENCE_NETWORK" ? "AN" : key.slice(0, 2)));
+  }
   function platBadges(platforms) {
     return h("span", { className: "sl-plats" },
       (platforms || []).map(function (p, i) {
-        var key = String(p || "").toUpperCase();
-        return h("span", { key: i, className: "sl-plat",
-            title: key.toLowerCase().replace(/_/g, " ") },
-          PLAT_BADGES[key] || key.slice(0, 2).toLowerCase());
+        return platIcon(String(p || "").toUpperCase(), i);
       }));
   }
 
