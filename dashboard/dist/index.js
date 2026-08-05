@@ -24,7 +24,7 @@
   // Ambient FX (standalone installs; yields when the acvc bundle is present)
   // -------------------------------------------------------------------------
   (function ambientBackground() {
-    var ROUTES = { "/shorts": 1 };
+    var ROUTES = { "/shortform": 1 };
     var canvas = null, tintEl = null, raf = 0, stars = null;
     var pointer = { x: 0, y: 0 }, eased = { x: 0, y: 0 };
     var theme = { r: 20, g: 184, b: 166 }, fore = { r: 230, g: 230, b: 240 };
@@ -948,7 +948,7 @@
             "AI Cyber Value Creator"),
           h("h1", { style: { fontSize: 30, margin: "4px 0 6px",
                              fontWeight: 800 } },
-            "🎬 Shorts Lab")),
+            "🎬 Short Form")),
         h("div", { className: "sl-tabs" },
           TABS.map(function (t) {
             return h("button", {

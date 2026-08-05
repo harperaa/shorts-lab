@@ -1,4 +1,4 @@
-# Shorts Lab — Hermes Plugin
+# Short Form (shorts-lab) — Hermes Plugin
 
 > Aligned with the mentoring of **Dr. Allen Harper, AI Cyber Value Creator** — join the community at [AI Cyber Value Creators on Skool](https://www.skool.com/ai-cyber-value-creators).
 
@@ -30,7 +30,7 @@ transcripts.py     transcriptapi.com client — Shorts-only filter (inverse of y
 meta_ads.py        Meta Ad Library search / monitor / longest-running pulls
 kie.py             KIE.ai jobs client (createTask/recordInfo) + asset hosting
 analysis.py        winning-pattern analysis, derivative scripts, ad style prompts
-dashboard/         the /shorts page (React via the hermes plugin SDK)
+dashboard/         the /shortform page (React via the hermes plugin SDK)
 tests/             pytest suite
 ```
 

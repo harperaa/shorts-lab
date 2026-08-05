@@ -1,11 +1,11 @@
 {
   "name": "shorts-lab",
-  "label": "Shorts Lab",
+  "label": "Short Form",
   "description": "The Attract-phase workbench — competitor Shorts research, derivative content, Meta ads research, and winning-ad style transfer",
   "icon": "Zap",
   "version": "1.0.0",
   "tab": {
-    "path": "/shorts",
+    "path": "/shortform",
     "position": "after:kanban"
   },
   "entry": "dist/index.js",
