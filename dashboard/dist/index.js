@@ -603,7 +603,10 @@
              "15-3.6-3.85-.5-1.15-.4-2.1-.05-3z" }));
     }
     if (key === "THREADS") {
-      return wrap("#000",
+      return h("svg", Object.assign({}, S, { style: { display: "block" } }),
+        h("title", null, title),
+        h("circle", { cx: 12, cy: 12, r: 11.2, fill: "#000",
+            stroke: "#fff", strokeWidth: 1.6 }),
         h("text", { x: 12, y: 16.4, textAnchor: "middle", fontSize: 12.5,
             fill: "#fff", fontWeight: 700, fontFamily: "inherit" }, "@"));
     }
