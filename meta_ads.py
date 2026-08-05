@@ -93,6 +93,27 @@ def _parse_day(s: Optional[str]) -> Optional[float]:
             return None
 
 
+def _rank_pages(counts: Counter, names: dict, term: str) -> list:
+    """Name matches beat ad volume — a keyword search matches ad TEXT, so
+    high-volume pages that merely mention the words would otherwise drown
+    out the advertiser actually named that (same heuristic as the kit's
+    resolve_via_search)."""
+    import re as _re
+    t = term.lower().strip()
+    words = [w for w in _re.split(r"[^a-z0-9]+", t) if len(w) > 2]
+
+    def score(pid):
+        name = (names.get(pid) or "").lower()
+        exact = 2 if name == t else 0
+        allw = 1 if words and all(w in name for w in words) else 0
+        return (exact + allw, counts[pid])
+
+    ordered = sorted(counts, key=score, reverse=True)
+    return [{"pageId": pid, "name": names.get(pid) or pid,
+             "adCount": counts[pid],
+             "nameMatch": score(pid)[0] > 0} for pid in ordered[:20]]
+
+
 def search_pages(term: str, countries: str = "US",
                  days: int = 365) -> list[dict]:
     """Discover competitor pages by searching the Ad Library for a term.
@@ -102,6 +123,8 @@ def search_pages(term: str, countries: str = "US",
     data = _get(f"{BASE_URL}/ads_archive", {
         "access_token": token,
         "search_terms": term,
+        "search_type": ("KEYWORD_EXACT_PHRASE" if " " in term.strip()
+                        else "KEYWORD_UNORDERED"),
         "ad_reached_countries": countries,
         "ad_delivery_date_min": date_min,
         "ad_delivery_date_max": date_max,
@@ -115,8 +138,7 @@ def search_pages(term: str, countries: str = "US",
     ads = data.get("data", [])
     counts = Counter(a.get("page_id") for a in ads if a.get("page_id"))
     names = {a.get("page_id"): a.get("page_name") for a in ads}
-    return [{"pageId": pid, "name": names.get(pid) or pid, "adCount": n}
-            for pid, n in counts.most_common(20)]
+    return _rank_pages(counts, names, term)
 
 
 def pull_page_ads(page_id: str, countries: str = "US", days: int = 365,
@@ -132,7 +154,7 @@ def pull_page_ads(page_id: str, countries: str = "US", days: int = 365,
         "ad_reached_countries": countries,
         "ad_delivery_date_min": date_min,
         "ad_delivery_date_max": date_max,
-        "ad_active_status": "ALL",
+        "ad_active_status": "ACTIVE",
         "sort_by": sort_by,
         "fields": ARCHIVE_FIELDS,
         "limit": min(limit, 100),
@@ -280,16 +302,68 @@ def _parse_any_date(v) -> Optional[float]:
     return _parse_day(str(v))
 
 
+def _extract_creative(it: dict) -> dict:
+    """Pull the displayable creative out of the actor's snapshot blob —
+    body text, title, CTA, media image, page avatar — defensively across
+    the shapes the actor emits (snapshot.body.text, cards[], images[],
+    videos[])."""
+    snap = it.get("snapshot") or {}
+    if not isinstance(snap, dict):
+        snap = {}
+    cards = snap.get("cards") or []
+    card0 = cards[0] if cards and isinstance(cards[0], dict) else {}
+
+    body = snap.get("body")
+    if isinstance(body, dict):
+        body = body.get("text")
+    body = body or card0.get("body") or ""
+    if isinstance(body, dict):
+        body = body.get("text") or ""
+
+    image = ""
+    video = False
+    for img in (snap.get("images") or []):
+        if isinstance(img, dict):
+            image = (img.get("original_image_url")
+                     or img.get("resized_image_url") or "")
+            if image:
+                break
+    if not image:
+        for vid in (snap.get("videos") or []):
+            if isinstance(vid, dict):
+                image = vid.get("video_preview_image_url") or ""
+                if image:
+                    video = True
+                    break
+    if not image:
+        image = (card0.get("original_image_url")
+                 or card0.get("resized_image_url") or "")
+        if not image and card0.get("video_preview_image_url"):
+            image = card0["video_preview_image_url"]
+            video = True
+
+    return {
+        "body": str(body or "")[:600],
+        "title": str(snap.get("title") or card0.get("title") or "")[:200],
+        "cta": str(snap.get("cta_text") or card0.get("cta_text") or "")[:60],
+        "image": str(image or "")[:1000],
+        "video": video,
+        "profile": str(snap.get("page_profile_picture_url") or "")[:1000],
+        "link": str(snap.get("link_url") or card0.get("link_url") or "")[:600],
+    }
+
+
 def apify_pull_page_ads(page_id: str, limit: int = 50) -> tuple[list, int]:
     """Run the actor synchronously for one page's Ad Library URL and
     upsert the results. Sync runs take ~30-120s."""
     token = _apify_token()
-    lib_url = ("https://www.facebook.com/ads/library/?active_status=all"
+    lib_url = ("https://www.facebook.com/ads/library/?active_status=active"
                "&ad_type=all&country=US&search_type=page"
                f"&view_all_page_id={page_id}")
     body = json.dumps({
         "startUrls": [{"url": lib_url}],
         "resultsLimit": min(limit, 100),
+        "activeStatus": "active",
     }).encode()
     url = (f"https://api.apify.com/v2/acts/{APIFY_ACTOR}"
            "/run-sync-get-dataset-items?token="
@@ -325,7 +399,8 @@ def apify_pull_page_ads(page_id: str, limit: int = 50) -> tuple[list, int]:
             it.get("pageName") or "",
             f"https://www.facebook.com/ads/library/?id={aid}",
             started, stopped, active,
-            it.get("publisherPlatform") or it.get("publisherPlatforms") or [])
+            it.get("publisherPlatform") or it.get("publisherPlatforms") or [],
+            creative=_extract_creative(it))
         new += 1 if created else 0
     if page_name:
         store.add_ad_page(str(page_id), page_name)
@@ -338,12 +413,17 @@ def apify_search_pages(term: str, limit: int = 50) -> list:
     startUrls). Aggregates results into the same page ranking the Meta
     search returns. Sync runs take ~30-120s."""
     token = _apify_token()
+    # multi-word queries use exact-phrase — the library matches advertiser
+    # names too, and exact phrase keeps "AI Cyber Value Creator" from being
+    # buried under every page whose ads merely say "creator"
+    stype = ("keyword_exact_phrase" if " " in term.strip()
+             else "keyword_unordered")
     search_url = ("https://www.facebook.com/ads/library/?active_status=all"
                   "&ad_type=all&country=US&q="
                   + urllib.parse.quote(term.strip())
-                  + "&search_type=keyword_unordered")
+                  + f"&search_type={stype}")
     body = json.dumps({"startUrls": [{"url": search_url}],
-                       "resultsLimit": min(limit, 100)}).encode()
+                       "resultsLimit": min(max(limit, 100), 200)}).encode()
     url = (f"https://api.apify.com/v2/acts/{APIFY_ACTOR}"
            "/run-sync-get-dataset-items?token="
            + urllib.parse.quote(token) + "&timeout=240")
@@ -367,8 +447,7 @@ def apify_search_pages(term: str, limit: int = 50) -> list:
             continue
         counts[pid] += 1
         names.setdefault(pid, it.get("pageName") or pid)
-    return [{"pageId": pid, "name": names[pid], "adCount": n}
-            for pid, n in counts.most_common(20)]
+    return _rank_pages(counts, names, term)
 
 
 def search_pages_any(term: str) -> list:

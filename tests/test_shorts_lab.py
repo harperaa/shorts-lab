@@ -180,7 +180,7 @@ def test_meta_ads_search_ranks_pages(home, monkeypatch):
 
     monkeypatch.setattr(meta_ads, "_get", fake_get)
     results = meta_ads.search_pages("brand")
-    assert results[0] == {"pageId": "1", "name": "Big Brand", "adCount": 5}
+    assert results[0]["pageId"] == "1" and results[0]["adCount"] == 5
     assert results[1]["adCount"] == 2
 
 
@@ -429,12 +429,69 @@ def test_apify_keyword_search_and_routing(home, monkeypatch):
     monkeypatch.setattr(_ur, "urlopen", fake_urlopen)
 
     results = meta_ads.apify_search_pages("Lifestyle Founders Group")
-    assert "q=Lifestyle%20Founders%20Group" in \
-        captured["body"]["startUrls"][0]["url"]
-    assert results[0] == {"pageId": "77",
-                          "name": "Lifestyle Founders Group", "adCount": 2}
+    url0 = captured["body"]["startUrls"][0]["url"]
+    assert "q=Lifestyle%20Founders%20Group" in url0
+    assert "keyword_exact_phrase" in url0     # multi-word -> exact phrase
+    assert results[0]["pageId"] == "77"
+    assert results[0]["name"] == "Lifestyle Founders Group"
+    assert results[0]["nameMatch"] is True
 
     # source routing: apify key present -> keyword search goes via apify
     assert meta_ads.get_ads_source() == "apify"
     routed = meta_ads.search_pages_any("Lifestyle Founders Group")
     assert routed[0]["pageId"] == "77"
+
+
+def test_search_ranks_name_match_over_volume(home):
+    from collections import Counter
+    counts = Counter({"999": 50, "77": 2})
+    names = {"999": "Content Creator.com", "77": "AI Cyber Value Creator"}
+    ranked = meta_ads._rank_pages(counts, names, "AI Cyber Value Creator")
+    # the page actually NAMED that beats the noisy high-volume page
+    assert ranked[0]["pageId"] == "77" and ranked[0]["nameMatch"] is True
+    assert ranked[1]["pageId"] == "999" and ranked[1]["nameMatch"] is False
+
+
+def test_apify_pull_stores_creative_and_requests_active(home, monkeypatch):
+    monkeypatch.setenv("APIFY_API_TOKEN", "apify_api_x")
+    captured = {}
+
+    class FakeResp:
+        def __init__(self, payload):
+            self._p = payload
+
+        def read(self):
+            return json.dumps(self._p).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout=280):
+        captured["body"] = json.loads(req.data.decode())
+        return FakeResp([{
+            "adArchiveID": "111", "pageID": "77", "pageName": "Acme",
+            "startDate": 1735689600, "isActive": True,
+            "publisherPlatform": ["FACEBOOK"],
+            "snapshot": {
+                "body": {"text": "You're technical. You know how systems work."},
+                "title": "Join the program", "cta_text": "Learn More",
+                "videos": [{"video_preview_image_url": "https://cdn/v.jpg"}],
+                "page_profile_picture_url": "https://cdn/p.jpg",
+                "link_url": "https://example.com"},
+        }])
+
+    import urllib.request as _ur
+    monkeypatch.setattr(_ur, "urlopen", fake_urlopen)
+    meta_ads.apify_pull_page_ads("77", limit=10)
+
+    assert captured["body"]["activeStatus"] == "active"
+    assert "active_status=active" in captured["body"]["startUrls"][0]["url"]
+    ad = store.list_ads()[0]
+    cr = ad["creative"]
+    assert cr["body"].startswith("You're technical")
+    assert cr["image"] == "https://cdn/v.jpg" and cr["video"] is True
+    assert cr["cta"] == "Learn More"
+    assert cr["profile"] == "https://cdn/p.jpg"

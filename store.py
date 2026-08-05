@@ -96,6 +96,12 @@ def connect() -> sqlite3.Connection:
     conn = sqlite3.connect(db_path())
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
+    # migration: creative payload (body/image/cta from the Apify snapshot)
+    try:
+        conn.execute("ALTER TABLE ads ADD COLUMN creative TEXT "
+                     "NOT NULL DEFAULT '{}'")
+    except sqlite3.OperationalError:
+        pass          # column already exists
     return conn
 
 
@@ -252,7 +258,7 @@ def remove_ad_page(page_id: str) -> None:
 def upsert_ad(archive_id: str, page_id: str, page_name: str,
               snapshot_url: str, started: Optional[float],
               stopped: Optional[float], active: bool,
-              platforms: list) -> bool:
+              platforms: list, creative: Optional[dict] = None) -> bool:
     conn = connect()
     try:
         row = conn.execute("SELECT archive_id FROM ads WHERE archive_id=?",
@@ -261,10 +267,11 @@ def upsert_ad(archive_id: str, page_id: str, page_name: str,
             conn.execute(
                 "INSERT OR REPLACE INTO ads (archive_id, page_id, page_name,"
                 " snapshot_url, started, stopped, active, platforms,"
-                " pulled_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                " creative, pulled_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (str(archive_id), str(page_id), page_name[:200], snapshot_url,
                  started, stopped, 1 if active else 0,
-                 json.dumps(platforms or []), time.time()))
+                 json.dumps(platforms or []),
+                 json.dumps(creative or {})[:20_000], time.time()))
         return row is None
     finally:
         conn.close()
@@ -283,6 +290,10 @@ def list_ads(page_id: Optional[str] = None) -> list[dict]:
         for r in rows:
             d = dict(r)
             d["platforms"] = json.loads(d.get("platforms") or "[]")
+            try:
+                d["creative"] = json.loads(d.get("creative") or "{}")
+            except (TypeError, ValueError):
+                d["creative"] = {}
             start = d.get("started")
             end = d.get("stopped") or (now if d.get("active") else None)
             d["daysRunning"] = (round((end - start) / 86400)

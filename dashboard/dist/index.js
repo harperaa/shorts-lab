@@ -678,6 +678,8 @@
     var sync = st.adsSync || {};
     var connectSt = useState(false);
     var showConnect = connectSt[0], setShowConnect = connectSt[1];
+    var endedSt = useState(false);
+    var showEnded = endedSt[0], setShowEnded = endedSt[1];
 
     function search() {
       if (busy) return;
@@ -859,42 +861,108 @@
             ? h("span", { className: "sl-err" }, sync.error) : null)),
 
       h("div", { style: { fontWeight: 800, margin: "4px 0 10px" } },
-        "Their ads — longest running first",
+        "Their active ads — longest running first",
         h("span", { className: "sl-note", style: { fontWeight: 400,
             marginLeft: 8 } },
           "a long run means it keeps paying — those are the ones to study")),
-      (st.ads || []).length === 0
-        ? h("div", { className: "sl-card sl-note" },
+      (function () {
+        var all = st.ads || [];
+        var activeAds = all.filter(function (a) { return a.active; });
+        var endedAds = all.filter(function (a) { return !a.active; });
+        var shown = showEnded ? all : activeAds;
+        if (!all.length) {
+          return h("div", { className: "sl-card sl-note" },
             (st.keys.meta || st.keys.apify)
               ? "No ads pulled yet — monitor a page and Sync."
               : "Connect Apify or Meta to pull ads in — until then, each " +
-                "monitored page above links straight to all of its ads.")
-        : st.ads.slice(0, 80).map(function (a) {
-            return h("div", { key: a.archive_id, className: "sl-card sl-ad" },
-              h("span", { className: "sl-days" },
-                a.daysRunning != null ? a.daysRunning + "d" : "—"),
+                "monitored page above links straight to all of its ads.");
+        }
+        function adCard(a) {
+          var cr = a.creative || {};
+          var when = a.started
+            ? new Date(a.started * 1000).toLocaleDateString(undefined,
+                { month: "short", day: "numeric", year: "numeric" })
+            : null;
+          return h("div", { key: a.archive_id, className: "sl-adcard" },
+            h("div", { className: "sl-adcard-top" },
               h("span", { className: "sl-chip " +
                   (a.active ? "sl-active" : "sl-ended") },
-                a.active ? "ACTIVE" : "ended"),
-              h("span", { style: { fontWeight: 700 } }, a.page_name),
-              h("span", { className: "sl-note" },
-                (a.platforms || []).join(", ")),
+                a.active ? "● Active" : "ended"),
+              h("span", { className: "sl-days" },
+                a.daysRunning != null ? a.daysRunning + "d" : "—"),
               h("span", { style: { flex: 1 } }),
-              a.snapshot_url
-                ? h("a", { className: "sl-link", href: a.snapshot_url,
-                    target: "_blank", rel: "noreferrer" }, "View creative ↗")
-                : h("a", { className: "sl-link", href: libPageUrl(a.page_id),
-                    target: "_blank", rel: "noreferrer" }, "Ad Library ↗"),
-              h("button", { className: "sl-btn", style: { fontSize: 12 },
+              h("a", { className: "sl-link",
+                  href: a.snapshot_url || libPageUrl(a.page_id),
+                  target: "_blank", rel: "noreferrer" }, "details ↗")),
+            when
+              ? h("div", { className: "sl-note",
+                  style: { padding: "0 12px" } },
+                  "Started running " + when)
+              : null,
+            h("div", { className: "sl-adcard-id" },
+              cr.profile
+                ? h("img", { className: "sl-avatar", src: cr.profile,
+                    alt: "" })
+                : h("span", { className: "sl-avatar sl-avatar-ph" },
+                    (a.page_name || "?").slice(0, 1)),
+              h("div", null,
+                h("div", { style: { fontWeight: 700, fontSize: 13 } },
+                  a.page_name),
+                h("div", { className: "sl-note",
+                    style: { fontSize: 11 } }, "Sponsored"))),
+            cr.body
+              ? h("div", { className: "sl-adcard-body" }, cr.body)
+              : null,
+            cr.image
+              ? h("div", { className: "sl-adcard-media" },
+                  h("img", { src: cr.image, alt: "", loading: "lazy" }),
+                  cr.video
+                    ? h("span", { className: "sl-play" }, "▶")
+                    : null)
+              : null,
+            (cr.title || cr.cta)
+              ? h("div", { className: "sl-adcard-cta" },
+                  h("span", { style: { fontWeight: 700, fontSize: 12.5,
+                      flex: 1 } }, cr.title || ""),
+                  cr.cta
+                    ? h("span", { className: "sl-chip" }, cr.cta)
+                    : null)
+              : null,
+            h("div", { className: "sl-adcard-foot" },
+              h("span", { className: "sl-note", style: { fontSize: 10.5,
+                  flex: 1 } },
+                (a.platforms || []).join(" · ").toLowerCase()),
+              h("button", { className: "sl-btn", style: { fontSize: 11.5,
+                  padding: "3px 10px" },
                   title: "Clone this winner's style with your own assets",
                   onClick: function () {
                     props.onUseAd(a.page_name + " ad, running " +
-                      (a.daysRunning != null ? a.daysRunning + " days" : "n/a") +
+                      (a.daysRunning != null ? a.daysRunning + " days"
+                                             : "n/a") +
                       (a.active ? " and still active" : "") +
+                      (cr.body ? ". Ad copy: \"" + cr.body.slice(0, 200) +
+                        "\"" : "") +
+                      (cr.cta ? " CTA: " + cr.cta : "") +
                       ". Snapshot: " + a.snapshot_url);
                   } },
-                "🎨 Use in Ads Lab"));
-          }));
+                "🎨 Use in Ads Lab")));
+        }
+        return h(React.Fragment, null,
+          shown.length
+            ? h("div", { className: "sl-adgrid" },
+                shown.slice(0, 60).map(adCard))
+            : h("div", { className: "sl-card sl-note" },
+                "No active ads right now — Sync again later, or show the " +
+                "ended ones below."),
+          endedAds.length
+            ? h("div", { style: { marginTop: 10 } },
+                h("button", { className: "sl-btn", style: { fontSize: 12 },
+                    onClick: function () { setShowEnded(!showEnded); } },
+                  showEnded
+                    ? "Hide ended ads"
+                    : "Show " + endedAds.length + " ended ad(s)"))
+            : null);
+      })());
   }
 
   // -------------------------------------------------------------------------
