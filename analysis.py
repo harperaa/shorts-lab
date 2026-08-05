@@ -263,7 +263,7 @@ def build_ad_prompt(brief: str, ad_context: str = "") -> dict:
     extract what makes the winner work, re-parameterize with the user's
     subject and offer)."""
     ad_note = (f"\n\nTHE WINNING AD BEING CLONED (metadata + user "
-               f"description): {ad_context.strip()[:1500]}"
+               f"description): {ad_context.strip()[:3500]}"
                if ad_context.strip() else "")
     prompt = (
         "You are an ad creative director doing a style transfer (the "

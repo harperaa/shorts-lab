@@ -355,7 +355,7 @@
                       return h("li", { key: i }, o, " ",
                         h("button", { className: "sl-btn",
                             style: { fontSize: 11, padding: "2px 10px" },
-                            title: "Draft this on the Shorts Content tab",
+                            title: "Draft this on the Shorts Lab tab",
                             onClick: function () { props.onDraft(o); } },
                           "✍️ Draft this"));
                     })))
@@ -1064,14 +1064,21 @@
                   padding: "3px 10px" },
                   title: "Clone this winner's style with your own assets",
                   onClick: function () {
-                    props.onUseAd(a.page_name + " ad, running " +
-                      (a.daysRunning != null ? a.daysRunning + " days"
-                                             : "n/a") +
-                      (a.active ? " and still active" : "") +
-                      (cr.body ? ". Ad copy: \"" + cr.body.slice(0, 200) +
-                        "\"" : "") +
-                      (cr.cta ? " CTA: " + cr.cta : "") +
-                      ". Snapshot: " + a.snapshot_url);
+                    var lines = [
+                      a.page_name + " ad — running " +
+                        (a.daysRunning != null ? a.daysRunning + " days"
+                                               : "n/a") +
+                        (a.active ? ", still active" : ", ended") + ".",
+                    ];
+                    if (cr.title) lines.push("Headline: " + cr.title);
+                    if (cr.cta) lines.push("CTA: " + cr.cta);
+                    if (cr.body) lines.push("FULL AD COPY:\n" + cr.body);
+                    if (cr.link) lines.push("Landing page: " + cr.link);
+                    lines.push("Snapshot: " + a.snapshot_url);
+                    props.onUseAd({
+                      context: lines.join("\n"),
+                      styleImage: cr.image || "",
+                    });
                   } },
                 "🪄 Use in Ads Lab")));
         }
@@ -1130,6 +1137,10 @@
            : (props.value ? "✓ " + props.value : props.label));
   }
 
+  function AdLabTabWrap(props) {
+    return h(AdsLabTab, props);
+  }
+
   function AdsLabTab(props) {
     var st = props.st;
     var briefSt = useState("");
@@ -1140,6 +1151,8 @@
     var source = srcSt[0], setSource = srcSt[1];
     var stySt = useState(null);
     var styleRef = stySt[0], setStyleRef = stySt[1];
+    var adStyleSt = useState(props.adStyleUrl || "");
+    var adStyle = adStyleSt[0], setAdStyle = adStyleSt[1];
     var busySt = useState(false);
     var busy = busySt[0], setBusy = busySt[1];
     var errSt = useState(null);
@@ -1152,6 +1165,9 @@
     useEffect(function () {
       if (props.adContext) setAdContext(props.adContext);
     }, [props.adContext]);
+    useEffect(function () {
+      if (props.adStyleUrl) setAdStyle(props.adStyleUrl);
+    }, [props.adStyleUrl]);
 
     var briefRef = useRef(null);
     function generate() {
@@ -1166,6 +1182,7 @@
         brief: brief, adContext: adContext,
         sourceAssetId: source ? source.id : "",
         styleAssetId: styleRef ? styleRef.id : "",
+        styleUrl: (!styleRef && adStyle) ? adStyle : "",
       })
         .then(function (r) { props.onState(r.state); setOpen(r.creationId); })
         .catch(function (e) { setErr(String((e && e.message) || e)); })
@@ -1220,9 +1237,22 @@
             onUploaded: function (id, name) { setSource({ id: id, name: name }); },
             onError: setErr }),
           h(UploadSlot, { label: "🖼 Style reference — winning ad screenshot",
-            value: styleRef && styleRef.name,
+            value: styleRef ? styleRef.name
+              : (adStyle ? "creative from the selected ad" : null),
             onUploaded: function (id, name) { setStyleRef({ id: id, name: name }); },
             onError: setErr })),
+        adStyle && !styleRef
+          ? h("div", { style: { display: "flex", gap: 10,
+              alignItems: "center", marginTop: 8 } },
+              h("img", { src: adStyle, alt: "", style: { width: 54,
+                  height: 54, objectFit: "cover", borderRadius: 8,
+                  border: "1px solid var(--color-border, #2b2b44)" } }),
+              h("span", { className: "sl-note" },
+                "The selected ad's creative rides along as the style " +
+                "reference — upload your own to override it."),
+              h("button", { className: "sl-btn", style: { fontSize: 11 },
+                  onClick: function () { setAdStyle(""); } }, "✕"))
+          : null,
         h("div", { className: "sl-note", style: { marginTop: 8 } },
           "Reference images are briefly hosted on a public temp URL so the " +
           "generator can fetch them (KIE takes URLs only)."),
@@ -1287,7 +1317,7 @@
   // -------------------------------------------------------------------------
   var TABS = [
     ["research", "Shorts Research"],
-    ["content", "Shorts Content"],
+    ["content", "Shorts Lab"],
     ["adsresearch", "Ads Research"],
     ["adslab", "Ads Lab"],
   ];
@@ -1306,6 +1336,8 @@
     var draftBrief = draftSt[0], setDraftBrief = draftSt[1];
     var adCtxSt = useState("");
     var adContext = adCtxSt[0], setAdContext = adCtxSt[1];
+    var adStyleSt = useState("");
+    var adStyleUrl = adStyleSt[0], setAdStyleUrl = adStyleSt[1];
 
     function pickTab(t) {
       setTab(t);
@@ -1376,8 +1408,13 @@
                 draftBrief: draftBrief })
             : tab === "adsresearch"
               ? h(AdsResearchTab, { st: st, onState: setSt,
-                  onUseAd: function (ctx) { setAdContext(ctx); pickTab("adslab"); } })
-              : h(AdsLabTab, { st: st, onState: setSt, adContext: adContext })));
+                  onUseAd: function (payload) {
+                    setAdContext(payload.context || "");
+                    setAdStyleUrl(payload.styleImage || "");
+                    pickTab("adslab");
+                  } })
+              : h(AdLabTabWrap, { st: st, onState: setSt,
+                  adContext: adContext, adStyleUrl: adStyleUrl })));
   }
 
   window.__HERMES_PLUGINS__.register("shorts-lab", ShortsLabPage);
