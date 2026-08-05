@@ -1,0 +1,30 @@
+name: shorts-lab
+version: 1.0.0
+description: >
+  Shorts Lab — the Attract-phase workbench. Shorts Research pulls your
+  monitored competitors' recent YouTube Shorts (shared competitor list with
+  YouTube Insights) and mines what's winning — hooks, message, format, style.
+  Shorts Content turns those patterns into derivative scripts and renders.
+  Ads Research searches the Meta Ad Library for competitor ads and surfaces
+  the longest-running winners. Ads Lab converts your own assets (portraits,
+  product shots) into the style of a winning ad via KIE.ai.
+author: Allen Harper
+kind: standalone
+manifest_version: 1
+
+requires_env:
+  - name: TRANSCRIPT_API_KEY
+    description: "transcriptapi.com key — shared with YouTube Insights; powers the Shorts Research pull"
+    url: "https://transcriptapi.com"
+    secret: true
+  - name: META_ACCESS_TOKEN
+    description: "Meta Graph API token (Ad Library access) — powers Ads Research competitor pulls"
+    url: "https://developers.facebook.com/tools/explorer/"
+    secret: true
+  - name: KIE_API_KEY
+    description: "KIE.ai API key — powers Ads Lab image generation and Shorts Content renders"
+    url: "https://kie.ai/api-key"
+    secret: true
+
+provides_tools:
+  - shorts_search

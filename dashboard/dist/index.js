@@ -1,0 +1,974 @@
+/**
+ * Shorts Lab — Hermes Dashboard Plugin
+ *
+ * Attract-phase workbench, four tabs:
+ *   1. Shorts Research — monitored competitors' recent YouTube Shorts
+ *      (channel list SHARED with YouTube Insights — one source of truth),
+ *      with a winning-pattern analysis: hooks, message, format, style.
+ *   2. Shorts Content — derivative scripts from those winning patterns,
+ *      viewable and downloadable.
+ *   3. Ads Research — Meta Ad Library competitor search + monitoring,
+ *      longest-running winners first.
+ *   4. Ads Lab — convert your own assets into the style of a winning ad
+ *      via KIE.ai (image-ad-clone method).
+ *
+ * Plain IIFE, no build step. window.__HERMES_PLUGIN_SDK__ for React.
+ */
+(function () {
+  "use strict";
+
+  var SDK = window.__HERMES_PLUGIN_SDK__;
+  if (!SDK || !window.__HERMES_PLUGINS__) return;
+
+  // -------------------------------------------------------------------------
+  // Ambient FX (standalone installs; yields when the acvc bundle is present)
+  // -------------------------------------------------------------------------
+  (function ambientBackground() {
+    var ROUTES = { "/shorts": 1 };
+    var canvas = null, tintEl = null, raf = 0, stars = null;
+    var pointer = { x: 0, y: 0 }, eased = { x: 0, y: 0 };
+    var theme = { r: 20, g: 184, b: 166 }, fore = { r: 230, g: 230, b: 240 };
+    var lightTheme = false, moteBase = 255, dpr = 1;
+    var probeCanvas = null;
+
+    function parseColor(col, fallback) {
+      if (!probeCanvas) { probeCanvas = document.createElement("canvas"); probeCanvas.width = probeCanvas.height = 1; }
+      var x = probeCanvas.getContext("2d", { willReadFrequently: true });
+      x.fillStyle = fallback; x.fillStyle = col;
+      x.clearRect(0, 0, 1, 1); x.fillRect(0, 0, 1, 1);
+      var d = x.getImageData(0, 0, 1, 1).data;
+      return { r: d[0], g: d[1], b: d[2] };
+    }
+    function resolveVar(name, fallback) {
+      var probe = document.createElement("span");
+      probe.style.color = "var(" + name + ", " + fallback + ")";
+      probe.style.display = "none";
+      document.body.appendChild(probe);
+      var col = getComputedStyle(probe).color;
+      probe.remove();
+      return parseColor(col, fallback);
+    }
+    function refreshPalette() {
+      theme = resolveVar("--color-primary", "#14b8a6");
+      fore = parseColor(getComputedStyle(document.body).color, "#e6e6f0");
+      var card = resolveVar("--color-card", "#16162a");
+      var lum = 0.2126 * card.r + 0.7152 * card.g + 0.0722 * card.b;
+      lightTheme = lum > 140;
+      moteBase = lightTheme ? 0 : 255;
+    }
+    function effectsOff() {
+      try { return localStorage.getItem("vcl-effects-off") === "1"; }
+      catch (e) { return false; }
+    }
+    function resize() {
+      if (!canvas) return;
+      dpr = window.devicePixelRatio || 1;
+      canvas.width = window.innerWidth * dpr;
+      canvas.height = window.innerHeight * dpr;
+    }
+    function onMove(e) {
+      pointer.x = (e.clientX / window.innerWidth - 0.5) * 2;
+      pointer.y = (e.clientY / window.innerHeight - 0.5) * 2;
+    }
+    function frame(t) {
+      if (!canvas) return;
+      var ctx = canvas.getContext("2d");
+      var w = canvas.width, hgt = canvas.height;
+      if (effectsOff()) { ctx.clearRect(0, 0, w, hgt); raf = requestAnimationFrame(frame); return; }
+      eased.x += (pointer.x - eased.x) * 0.03;
+      eased.y += (pointer.y - eased.y) * 0.03;
+      ctx.clearRect(0, 0, w, hgt);
+      var lx = (0.5 + 0.34 * Math.sin(t * 0.000041)) * w;
+      var ly = (0.42 + 0.30 * Math.sin(t * 0.000029 + 1.7)) * hgt;
+      var lr = Math.max(w, hgt) * 0.42;
+      var glow = ctx.createRadialGradient(lx, ly, 0, lx, ly, lr);
+      glow.addColorStop(0, "rgba(" + theme.r + "," + theme.g + "," + theme.b + ",0.34)");
+      glow.addColorStop(0.55, "rgba(" + theme.r + "," + theme.g + "," + theme.b + ",0.13)");
+      glow.addColorStop(1, "rgba(" + theme.r + "," + theme.g + "," + theme.b + ",0)");
+      ctx.fillStyle = glow; ctx.fillRect(0, 0, w, hgt);
+      var l2x = (0.5 - 0.38 * Math.sin(t * 0.000033 + 0.6)) * w;
+      var l2y = (0.55 + 0.28 * Math.cos(t * 0.000047)) * hgt;
+      var g2 = ctx.createRadialGradient(l2x, l2y, 0, l2x, l2y, lr * 0.7);
+      g2.addColorStop(0, "rgba(" + fore.r + "," + fore.g + "," + fore.b + "," + (lightTheme ? 0.09 : 0.13) + ")");
+      g2.addColorStop(1, "rgba(" + fore.r + "," + fore.g + "," + fore.b + ",0)");
+      ctx.fillStyle = g2; ctx.fillRect(0, 0, w, hgt);
+      for (var i = 0; i < stars.length; i++) {
+        var st = stars[i];
+        st.x += 0.000012 * (0.3 + st.depth);
+        st.y -= 0.0000048 * (0.3 + st.depth);
+        if (st.x > 1.02) st.x = -0.02;
+        if (st.y < -0.02) st.y = 1.02;
+        var px = (st.x + eased.x * 0.012 * st.depth) * w;
+        var py = (st.y + eased.y * 0.012 * st.depth) * hgt;
+        var a = (0.10 + 0.16 * st.depth) *
+          (0.7 + 0.3 * Math.sin(t * 0.00045 * st.twinkle + st.phase));
+        var base = st.themed ? theme : fore;
+        var cr = Math.round(base.r * 0.45 + moteBase * 0.55);
+        var cg = Math.round(base.g * 0.45 + moteBase * 0.55);
+        var cb = Math.round(base.b * 0.45 + moteBase * 0.55);
+        ctx.beginPath();
+        ctx.fillStyle = "rgba(" + cr + "," + cg + "," + cb + "," + a + ")";
+        ctx.arc(px, py, (0.5 + st.depth * 0.9) * dpr, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      raf = requestAnimationFrame(frame);
+    }
+    function mount() {
+      if (canvas) return;
+      stars = [];
+      for (var i = 0; i < 140; i++) {
+        stars.push({ x: Math.random(), y: Math.random(),
+          depth: 0.35 + Math.random() * 0.65,
+          phase: Math.random() * Math.PI * 2,
+          twinkle: 0.4 + Math.random() * 0.8,
+          themed: Math.random() < 0.45 });
+      }
+      tintEl = document.createElement("div");
+      tintEl.className = "sl-ambient-tint";
+      canvas = document.createElement("canvas");
+      canvas.className = "sl-ambient-canvas";
+      canvas.style.opacity = "0.95";
+      document.body.appendChild(tintEl);
+      document.body.appendChild(canvas);
+      refreshPalette(); resize();
+      window.addEventListener("resize", resize);
+      window.addEventListener("mousemove", onMove);
+      raf = requestAnimationFrame(frame);
+    }
+    function unmount() {
+      if (!canvas) return;
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", resize);
+      window.removeEventListener("mousemove", onMove);
+      canvas.remove(); tintEl.remove();
+      canvas = null; tintEl = null;
+    }
+    function check() {
+      var acvcOwns = !!document.getElementById("acvc-sidebar-order");
+      if (ROUTES[window.location.pathname] && !acvcOwns) mount(); else unmount();
+    }
+    try {
+      new MutationObserver(function () { refreshPalette(); })
+        .observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style", "data-theme"] });
+    } catch (e) {}
+    setInterval(refreshPalette, 3000);
+    window.addEventListener("popstate", check);
+    setInterval(check, 800);
+    check();
+  })();
+
+  var React = SDK.React;
+  var h = React.createElement;
+  var hooks = SDK.hooks;
+  var useState = hooks.useState;
+  var useEffect = hooks.useEffect;
+  var useCallback = hooks.useCallback;
+  var useRef = hooks.useRef;
+
+  var API = "/api/plugins/shorts-lab";
+
+  function api(path, options) {
+    return SDK.fetchJSON(API + path, options);
+  }
+
+  function postJSON(path, body) {
+    return api(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+  }
+
+  var MUTED = "var(--color-muted-foreground, #9aa0b4)";
+
+  function fmtViews(n) {
+    n = Number(n) || 0;
+    if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
+    if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "K";
+    return String(n);
+  }
+  function fmtWhen(ts) {
+    if (!ts) return "";
+    return new Date(ts * 1000).toLocaleDateString(undefined,
+      { month: "short", day: "numeric" });
+  }
+  function downloadText(name, text) {
+    var blob = new Blob([text], { type: "text/markdown" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+  function slug(s) {
+    return String(s || "short").toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "short";
+  }
+
+  // -------------------------------------------------------------------------
+  // Tab 1 — Shorts Research
+  // -------------------------------------------------------------------------
+  function ShortsResearchTab(props) {
+    var st = props.st;
+    var addSt = useState("");
+    var newHandle = addSt[0], setNewHandle = addSt[1];
+    var busySt = useState(null);
+    var busy = busySt[0], setBusy = busySt[1];
+    var errSt = useState(null);
+    var err = errSt[0], setErr = errSt[1];
+
+    var sync = st.shortsSync || {};
+    var analysis = st.shortsAnalysis;
+
+    function addChannel() {
+      var v = newHandle.trim();
+      if (!v) return;
+      setBusy("chan"); setErr(null);
+      postJSON("/channels", { handle: v, action: "add" })
+        .then(function (r) { props.onState(r.state); setNewHandle(""); })
+        .catch(function (e) { setErr(String((e && e.message) || e)); })
+        .finally(function () { setBusy(null); });
+    }
+    function removeChannel(handle) {
+      postJSON("/channels", { handle: handle, action: "remove" })
+        .then(function (r) { props.onState(r.state); })
+        .catch(function (e) { setErr(String((e && e.message) || e)); });
+    }
+    function doSync() {
+      setBusy("sync"); setErr(null);
+      postJSON("/shorts/sync", {})
+        .then(function (r) { props.onState(r.state); })
+        .catch(function (e) { setErr(String((e && e.message) || e)); })
+        .finally(function () { setBusy(null); });
+    }
+    function doAnalyze() {
+      setBusy("analyze"); setErr(null);
+      postJSON("/shorts/analyze", {})
+        .then(function (r) { props.onState(r.state); })
+        .catch(function (e) { setErr(String((e && e.message) || e)); })
+        .finally(function () { setBusy(null); });
+    }
+
+    function analList(title, items) {
+      if (!items || !items.length) return null;
+      return h("div", null,
+        h("div", { className: "sl-h" }, title),
+        h("ul", { className: "sl-list" }, items.map(function (x, i) {
+          return h("li", { key: i }, x);
+        })));
+    }
+
+    return h("div", null,
+      h("div", { className: "sl-card" },
+        h("div", { style: { fontWeight: 800, marginBottom: 8 } },
+          "Monitored competitors"),
+        h("div", { className: "sl-note", style: { marginBottom: 10 } },
+          "One list, two pages — this is the same competitor list YouTube " +
+          "Insights tracks. Add or remove here and it updates there too."),
+        h("div", { style: { display: "flex", gap: 8, flexWrap: "wrap",
+                            alignItems: "center" } },
+          (st.channels || []).map(function (c) {
+            return h("span", { key: c, className: "sl-tag" }, c,
+              h("button", { title: "Stop monitoring " + c,
+                  onClick: function () { removeChannel(c); } }, "✕"));
+          }),
+          h("input", {
+            className: "sl-input", style: { maxWidth: 220, display: "inline-block" },
+            placeholder: "@channelhandle", value: newHandle,
+            onChange: function (e) { setNewHandle(e.target.value); },
+            onKeyDown: function (e) { if (e.key === "Enter") addChannel(); },
+          }),
+          h("button", { className: "sl-btn", disabled: busy !== null,
+                        onClick: addChannel }, "＋ Add")),
+        h("div", { style: { display: "flex", gap: 10, alignItems: "center",
+                            flexWrap: "wrap", marginTop: 12 } },
+          h("button", { className: "sl-btn sl-btn-primary",
+              disabled: busy !== null || !!sync.running,
+              title: "Pull the last 30 days of Shorts for every monitored channel",
+              onClick: doSync },
+            sync.running ? "Syncing…" : "⟳ Sync shorts (30 days)"),
+          (st.shorts || []).length
+            ? h("button", { className: "sl-btn", disabled: busy !== null,
+                  title: "Mine the winning hooks, messages, formats, and styles",
+                  onClick: doAnalyze },
+                busy === "analyze" ? "Analyzing…" : "✨ Analyze what's winning")
+            : null,
+          sync.running
+            ? h("span", { className: "sl-busy" },
+                h("span", { className: "sl-spin" }, "◐"),
+                " Pulling shorts + transcripts — safe to leave or refresh")
+            : null,
+          !sync.running && sync.summary
+            ? h("span", { className: "sl-note" },
+                "Last sync: " + (sync.summary.shorts || 0) + " shorts across " +
+                (sync.summary.channels || 0) + " channel(s)" +
+                ((sync.summary.errors || []).length
+                  ? " · " + sync.summary.errors.length + " error(s)"
+                  : ""))
+            : null,
+          !sync.running && sync.error
+            ? h("span", { className: "sl-err" }, sync.error) : null),
+        !st.keys.transcript
+          ? h("div", { className: "sl-err", style: { marginTop: 8 } },
+              "TRANSCRIPT_API_KEY is not set — add it on the Keys page " +
+              "(same key YouTube Insights uses).")
+          : null,
+        err ? h("div", { className: "sl-err" }, err) : null,
+        (sync.summary && (sync.summary.errors || []).length)
+          ? h("div", { className: "sl-note", style: { marginTop: 6 } },
+              sync.summary.errors.join(" · "))
+          : null),
+
+      analysis
+        ? h("div", { className: "sl-card" },
+            h("div", { style: { fontWeight: 800, marginBottom: 4 } },
+              "🏆 What's winning" ,
+              h("span", { className: "sl-note", style: { fontWeight: 400,
+                  marginLeft: 8 } },
+                analysis.shortCount + " shorts · last " + (analysis.days || 30) +
+                " days")),
+            h("p", { style: { fontSize: 13.5, margin: "6px 0 4px" } },
+              analysis.summary),
+            h("div", { className: "sl-anal-grid" },
+              analList("Winning hooks", analysis.winningHooks),
+              analList("Winning messages", analysis.winningMessages),
+              analList("Winning formats", analysis.winningFormats),
+              analList("Winning styles", analysis.winningStyles)),
+            (analysis.channels || []).length
+              ? h("div", null,
+                  h("div", { className: "sl-h" }, "Per channel"),
+                  h("ul", { className: "sl-list" },
+                    analysis.channels.map(function (c, i) {
+                      return h("li", { key: i },
+                        h("b", null, c.channel + ": "),
+                        c.whatIsWorking + " ",
+                        h("span", { style: { color: MUTED } },
+                          "hook: " + c.hookStyle + " · format: " + c.format));
+                    })))
+              : null,
+            (analysis.opportunities || []).length
+              ? h("div", null,
+                  h("div", { className: "sl-h" }, "Your next derivatives"),
+                  h("ul", { className: "sl-list" },
+                    analysis.opportunities.map(function (o, i) {
+                      return h("li", { key: i }, o, " ",
+                        h("button", { className: "sl-btn",
+                            style: { fontSize: 11, padding: "2px 10px" },
+                            title: "Draft this on the Shorts Content tab",
+                            onClick: function () { props.onDraft(o); } },
+                          "✍️ Draft this"));
+                    })))
+              : null)
+        : null,
+
+      h("div", { style: { fontWeight: 800, margin: "4px 0 10px" } },
+        "Recent shorts",
+        h("span", { className: "sl-note", style: { fontWeight: 400,
+            marginLeft: 8 } },
+          (st.shorts || []).length + " in the last 30 days")),
+      (st.shorts || []).length === 0
+        ? h("div", { className: "sl-card sl-note" },
+            (st.channels || []).length
+              ? "No shorts pulled yet — hit ⟳ Sync."
+              : "Add a competitor channel above, then Sync.")
+        : h("div", { className: "sl-grid" },
+            st.shorts.map(function (s) {
+              return h("div", { key: s.videoId, className: "sl-short" },
+                s.thumbnail
+                  ? h("a", { href: s.link, target: "_blank", rel: "noreferrer" },
+                      h("img", { src: s.thumbnail, alt: "", loading: "lazy" }))
+                  : null,
+                h("div", { className: "sl-short-body" },
+                  h("a", { href: s.link, target: "_blank", rel: "noreferrer",
+                           style: { color: "inherit", textDecoration: "none" } },
+                    h("div", { className: "sl-short-title" }, s.title)),
+                  h("div", { className: "sl-short-meta" },
+                    h("span", { className: "sl-views" },
+                      fmtViews(s.viewCount) + " views"),
+                    h("span", null, s.channel),
+                    s.durationSeconds
+                      ? h("span", null, Math.round(s.durationSeconds) + "s")
+                      : null,
+                    s.published ? h("span", null, fmtWhen(s.published)) : null,
+                    s.hasTranscript
+                      ? h("span", { title: "transcript captured" }, "📝")
+                      : null)));
+            })));
+  }
+
+  // -------------------------------------------------------------------------
+  // Tab 2 — Shorts Content
+  // -------------------------------------------------------------------------
+  function ShortsContentTab(props) {
+    var st = props.st;
+    var briefSt = useState(props.draftBrief || "");
+    var brief = briefSt[0], setBrief = briefSt[1];
+    var patternSt = useState("");
+    var pattern = patternSt[0], setPattern = patternSt[1];
+    var busySt = useState(false);
+    var busy = busySt[0], setBusy = busySt[1];
+    var errSt = useState(null);
+    var err = errSt[0], setErr = errSt[1];
+    var openSt = useState(null);
+    var open = openSt[0], setOpen = openSt[1];
+    var contentSt = useState({});
+    var contents = contentSt[0], setContents = contentSt[1];
+
+    useEffect(function () {
+      if (props.draftBrief) setBrief(props.draftBrief);
+    }, [props.draftBrief]);
+
+    var analysis = st.shortsAnalysis;
+    var patterns = [];
+    if (analysis) {
+      (analysis.winningFormats || []).forEach(function (f) { patterns.push(f); });
+      (analysis.winningHooks || []).slice(0, 5).forEach(function (f) {
+        patterns.push("Hook: " + f);
+      });
+    }
+
+    function generate() {
+      if (!brief.trim() || busy) return;
+      setBusy(true); setErr(null);
+      postJSON("/derivative", { brief: brief, pattern: pattern })
+        .then(function (r) {
+          props.onState(r.state);
+          setOpen(r.creationId);
+          loadContent(r.creationId);
+        })
+        .catch(function (e) { setErr(String((e && e.message) || e)); })
+        .finally(function () { setBusy(false); });
+    }
+    function loadContent(id) {
+      if (contents[id]) return;
+      api("/creation/" + id).then(function (c) {
+        setContents(function (prev) {
+          var next = Object.assign({}, prev);
+          next[id] = c.content || "";
+          return next;
+        });
+      }).catch(function () {});
+    }
+    function remove(id) {
+      postJSON("/creations/delete", { id: id })
+        .then(function (r) { props.onState(r.state); })
+        .catch(function () {});
+    }
+
+    var scripts = (st.creations || []).filter(function (c) {
+      return c.kind === "short-script";
+    });
+
+    return h("div", null,
+      h("div", { className: "sl-card" },
+        h("div", { style: { fontWeight: 800, marginBottom: 6 } },
+          "✍️ New derivative short"),
+        h("div", { className: "sl-note", style: { marginBottom: 10 } },
+          "A derivative borrows the PATTERN that's winning — hook mechanics, " +
+          "structure, pacing — and applies it to your topic in your voice. " +
+          (analysis ? "The current winning-pattern analysis rides into every draft."
+                    : "Run ✨ Analyze on Shorts Research first for pattern-grounded drafts.")),
+        h("textarea", {
+          className: "sl-input", rows: 3,
+          placeholder: "What is this short about? Topic, audience, the one thing viewers should take away…",
+          value: brief,
+          onChange: function (e) { setBrief(e.target.value); },
+        }),
+        patterns.length
+          ? h("select", {
+              className: "sl-input", style: { marginTop: 8, width: "auto",
+                maxWidth: "100%" },
+              value: pattern,
+              onChange: function (e) { setPattern(e.target.value); },
+            },
+            [h("option", { key: "", value: "" }, "Pattern: let the writer pick")]
+              .concat(patterns.map(function (p, i) {
+                return h("option", { key: i, value: p },
+                  p.length > 90 ? p.slice(0, 90) + "…" : p);
+              })))
+          : null,
+        h("div", { style: { marginTop: 10 } },
+          h("button", { className: "sl-btn sl-btn-primary",
+              disabled: busy || !brief.trim(), onClick: generate },
+            busy ? "Writing…" : "✨ Write the script")),
+        err ? h("div", { className: "sl-err" }, err) : null),
+
+      h("div", { style: { fontWeight: 800, margin: "4px 0 10px" } },
+        "Your scripts",
+        h("span", { className: "sl-note",
+            style: { fontWeight: 400, marginLeft: 8 } },
+          scripts.length + " draft(s)")),
+      scripts.length === 0
+        ? h("div", { className: "sl-card sl-note" },
+            "Nothing yet — describe a short above and hit ✨.")
+        : scripts.map(function (c) {
+            var isOpen = open === c.id;
+            return h("div", { key: c.id, className: "sl-card sl-creation" },
+              h("div", { className: "sl-creation-head",
+                  onClick: function () {
+                    setOpen(isOpen ? null : c.id);
+                    if (!isOpen) loadContent(c.id);
+                  } },
+                h("span", { className: "sl-chev" + (isOpen ? " sl-chev-open" : "") }, "▸"),
+                h("span", { style: { fontWeight: 700, flex: 1 } }, c.title),
+                c.pattern
+                  ? h("span", { className: "sl-chip",
+                      title: c.pattern }, "pattern")
+                  : null,
+                h("button", { className: "sl-btn", style: { fontSize: 12 },
+                    title: "Download as markdown",
+                    onClick: function (e) {
+                      e.stopPropagation();
+                      var text = contents[c.id];
+                      if (text) { downloadText(slug(c.title) + ".md", text); return; }
+                      api("/creation/" + c.id).then(function (d) {
+                        downloadText(slug(c.title) + ".md", d.content || "");
+                      }).catch(function () {});
+                    } }, "⬇ Download"),
+                h("button", { className: "sl-btn", style: { fontSize: 12 },
+                    onClick: function (e) { e.stopPropagation(); remove(c.id); } },
+                  "🗑"),
+                h("span", { className: "sl-note" }, fmtWhen(c.createdAt))),
+              isOpen
+                ? h("pre", { className: "sl-md" },
+                    contents[c.id] || "Loading…")
+                : null);
+          }));
+  }
+
+  // -------------------------------------------------------------------------
+  // Tab 3 — Ads Research
+  // -------------------------------------------------------------------------
+  function AdsResearchTab(props) {
+    var st = props.st;
+    var qSt = useState("");
+    var q = qSt[0], setQ = qSt[1];
+    var resultsSt = useState(null);
+    var results = resultsSt[0], setResults = resultsSt[1];
+    var busySt = useState(null);
+    var busy = busySt[0], setBusy = busySt[1];
+    var errSt = useState(null);
+    var err = errSt[0], setErr = errSt[1];
+
+    var sync = st.adsSync || {};
+
+    function search() {
+      if (!q.trim() || busy) return;
+      setBusy("search"); setErr(null);
+      postJSON("/ads/search", { term: q.trim() })
+        .then(function (r) { setResults(r.results || []); })
+        .catch(function (e) { setErr(String((e && e.message) || e)); })
+        .finally(function () { setBusy(null); });
+    }
+    function monitor(pid, name) {
+      setBusy("mon"); setErr(null);
+      postJSON("/ads/monitor", { pageId: pid, name: name })
+        .then(function (r) { props.onState(r.state); })
+        .catch(function (e) { setErr(String((e && e.message) || e)); })
+        .finally(function () { setBusy(null); });
+    }
+    function unmonitor(pid) {
+      postJSON("/ads/unmonitor", { pageId: pid })
+        .then(function (r) { props.onState(r.state); })
+        .catch(function () {});
+    }
+    function doSync() {
+      setBusy("sync"); setErr(null);
+      postJSON("/ads/sync", {})
+        .then(function (r) { props.onState(r.state); })
+        .catch(function (e) { setErr(String((e && e.message) || e)); })
+        .finally(function () { setBusy(null); });
+    }
+
+    var monitored = {};
+    (st.adPages || []).forEach(function (p) { monitored[p.page_id] = true; });
+
+    return h("div", null,
+      h("div", { className: "sl-card" },
+        h("div", { style: { fontWeight: 800, marginBottom: 6 } },
+          "🔎 Find competitors in the Meta Ad Library"),
+        h("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+          h("input", {
+            className: "sl-input", style: { maxWidth: 360 },
+            placeholder: "Brand, competitor, or niche term…", value: q,
+            onChange: function (e) { setQ(e.target.value); },
+            onKeyDown: function (e) { if (e.key === "Enter") search(); },
+          }),
+          h("button", { className: "sl-btn sl-btn-primary",
+              disabled: busy !== null || !q.trim(), onClick: search },
+            busy === "search" ? "Searching…" : "Search")),
+        !st.keys.meta
+          ? h("div", { className: "sl-err", style: { marginTop: 8 } },
+              "META_ACCESS_TOKEN is not set — add it on the Keys page " +
+              "(Graph API token; the Ad Library search needs it).")
+          : null,
+        err ? h("div", { className: "sl-err" }, err) : null,
+        results
+          ? (results.length
+              ? h("div", { style: { marginTop: 10 } },
+                  results.map(function (r) {
+                    return h("div", { key: r.pageId,
+                        style: { display: "flex", gap: 10, alignItems: "center",
+                                 padding: "6px 0", flexWrap: "wrap" } },
+                      h("span", { style: { fontWeight: 700 } }, r.name),
+                      h("span", { className: "sl-note" },
+                        r.adCount + " ad(s) seen"),
+                      h("span", { style: { flex: 1 } }),
+                      monitored[r.pageId]
+                        ? h("span", { className: "sl-chip" }, "monitored")
+                        : h("button", { className: "sl-btn",
+                            style: { fontSize: 12 },
+                            disabled: busy !== null,
+                            onClick: function () { monitor(r.pageId, r.name); } },
+                          "👁 Monitor"));
+                  }))
+              : h("div", { className: "sl-note", style: { marginTop: 10 } },
+                  "No pages found for that term — try the brand's exact name."))
+          : null),
+
+      h("div", { className: "sl-card" },
+        h("div", { style: { display: "flex", gap: 10, alignItems: "center",
+                            flexWrap: "wrap" } },
+          h("div", { style: { fontWeight: 800 } }, "Monitored pages"),
+          (st.adPages || []).map(function (p) {
+            return h("span", { key: p.page_id, className: "sl-tag" },
+              p.name || p.page_id,
+              h("button", { title: "Stop monitoring",
+                  onClick: function () { unmonitor(p.page_id); } }, "✕"));
+          }),
+          (st.adPages || []).length === 0
+            ? h("span", { className: "sl-note" },
+                "none yet — search above and hit 👁 Monitor")
+            : null,
+          h("span", { style: { flex: 1 } }),
+          (st.adPages || []).length
+            ? h("button", { className: "sl-btn sl-btn-primary",
+                disabled: busy !== null || !!sync.running, onClick: doSync },
+                sync.running ? "Syncing…" : "⟳ Sync ads")
+            : null,
+          sync.running
+            ? h("span", { className: "sl-busy" },
+                h("span", { className: "sl-spin" }, "◐"), " Pulling ads…")
+            : null,
+          !sync.running && sync.error
+            ? h("span", { className: "sl-err" }, sync.error) : null)),
+
+      h("div", { style: { fontWeight: 800, margin: "4px 0 10px" } },
+        "Their ads — longest running first",
+        h("span", { className: "sl-note", style: { fontWeight: 400,
+            marginLeft: 8 } },
+          "a long run means it keeps paying — those are the ones to study")),
+      (st.ads || []).length === 0
+        ? h("div", { className: "sl-card sl-note" },
+            "No ads pulled yet — monitor a page and Sync.")
+        : st.ads.slice(0, 80).map(function (a) {
+            return h("div", { key: a.archive_id, className: "sl-card sl-ad" },
+              h("span", { className: "sl-days" },
+                a.daysRunning != null ? a.daysRunning + "d" : "—"),
+              h("span", { className: "sl-chip " +
+                  (a.active ? "sl-active" : "sl-ended") },
+                a.active ? "ACTIVE" : "ended"),
+              h("span", { style: { fontWeight: 700 } }, a.page_name),
+              h("span", { className: "sl-note" },
+                (a.platforms || []).join(", ")),
+              h("span", { style: { flex: 1 } }),
+              a.snapshot_url
+                ? h("a", { className: "sl-link", href: a.snapshot_url,
+                    target: "_blank", rel: "noreferrer" }, "View creative ↗")
+                : null,
+              h("button", { className: "sl-btn", style: { fontSize: 12 },
+                  title: "Clone this winner's style with your own assets",
+                  onClick: function () {
+                    props.onUseAd(a.page_name + " ad, running " +
+                      (a.daysRunning != null ? a.daysRunning + " days" : "n/a") +
+                      (a.active ? " and still active" : "") +
+                      ". Snapshot: " + a.snapshot_url);
+                  } },
+                "🎨 Use in Ads Lab"));
+          }));
+  }
+
+  // -------------------------------------------------------------------------
+  // Tab 4 — Ads Lab
+  // -------------------------------------------------------------------------
+  function UploadSlot(props) {
+    var inputRef = useRef(null);
+    var busySt = useState(false);
+    var busy = busySt[0], setBusy = busySt[1];
+
+    function onFile(e) {
+      var f = e.target.files && e.target.files[0];
+      if (!f) return;
+      setBusy(true);
+      var reader = new FileReader();
+      reader.onload = function () {
+        var b64 = String(reader.result || "").split(",")[1] || "";
+        postJSON("/asset", { filename: f.name, dataBase64: b64 })
+          .then(function (r) { props.onUploaded(r.assetId, f.name); })
+          .catch(function (err2) {
+            props.onError(String((err2 && err2.message) || err2));
+          })
+          .finally(function () { setBusy(false); });
+      };
+      reader.readAsDataURL(f);
+    }
+
+    return h("div", {
+        className: "sl-upload" + (props.value ? " sl-upload-on" : ""),
+        style: { flex: 1, minWidth: 200 },
+        onClick: function () {
+          if (inputRef.current) inputRef.current.click();
+        } },
+      h("input", { type: "file", accept: "image/*",
+        style: { display: "none" }, ref: inputRef, onChange: onFile }),
+      busy ? "Uploading…"
+           : (props.value ? "✓ " + props.value : props.label));
+  }
+
+  function AdsLabTab(props) {
+    var st = props.st;
+    var briefSt = useState("");
+    var brief = briefSt[0], setBrief = briefSt[1];
+    var ctxSt = useState(props.adContext || "");
+    var adContext = ctxSt[0], setAdContext = ctxSt[1];
+    var srcSt = useState(null);        // {id, name}
+    var source = srcSt[0], setSource = srcSt[1];
+    var stySt = useState(null);
+    var styleRef = stySt[0], setStyleRef = stySt[1];
+    var busySt = useState(false);
+    var busy = busySt[0], setBusy = busySt[1];
+    var errSt = useState(null);
+    var err = errSt[0], setErr = errSt[1];
+    var openSt = useState(null);
+    var open = openSt[0], setOpen = openSt[1];
+    var contentSt = useState({});
+    var contents = contentSt[0], setContents = contentSt[1];
+
+    useEffect(function () {
+      if (props.adContext) setAdContext(props.adContext);
+    }, [props.adContext]);
+
+    function generate() {
+      if (!brief.trim() || busy) return;
+      setBusy(true); setErr(null);
+      postJSON("/adlab/generate", {
+        brief: brief, adContext: adContext,
+        sourceAssetId: source ? source.id : "",
+        styleAssetId: styleRef ? styleRef.id : "",
+      })
+        .then(function (r) { props.onState(r.state); setOpen(r.creationId); })
+        .catch(function (e) { setErr(String((e && e.message) || e)); })
+        .finally(function () { setBusy(false); });
+    }
+    function loadContent(id) {
+      if (contents[id]) return;
+      api("/creation/" + id).then(function (c) {
+        setContents(function (prev) {
+          var next = Object.assign({}, prev);
+          next[id] = c.content || "";
+          return next;
+        });
+      }).catch(function () {});
+    }
+    function remove(id) {
+      postJSON("/creations/delete", { id: id })
+        .then(function (r) { props.onState(r.state); })
+        .catch(function () {});
+    }
+
+    var adsCreations = (st.creations || []).filter(function (c) {
+      return c.kind === "image-ad";
+    });
+
+    return h("div", null,
+      h("div", { className: "sl-card" },
+        h("div", { style: { fontWeight: 800, marginBottom: 6 } },
+          "🎨 Clone a winning ad's style"),
+        h("div", { className: "sl-note", style: { marginBottom: 10 } },
+          "The image-ad-clone method: your source image (a portrait, your " +
+          "product) is converted INTO the style of the winning ad — its " +
+          "composition, text placement, and mood — with your offer's copy. " +
+          "Grab a screenshot of the winning creative (View creative ↗ on " +
+          "Ads Research) as the style reference."),
+        h("textarea", {
+          className: "sl-input", rows: 3,
+          placeholder: "Your product/offer + audience — e.g. 'AI security bootcamp for career-switchers, $497, launch week urgency'…",
+          value: brief,
+          onChange: function (e) { setBrief(e.target.value); },
+        }),
+        h("textarea", {
+          className: "sl-input", rows: 2, style: { marginTop: 8 },
+          placeholder: "The winning ad you're cloning — filled automatically from 🎨 Use in Ads Lab, or describe it (layout, text, vibe)…",
+          value: adContext,
+          onChange: function (e) { setAdContext(e.target.value); },
+        }),
+        h("div", { style: { display: "flex", gap: 10, marginTop: 10,
+                            flexWrap: "wrap" } },
+          h(UploadSlot, { label: "📷 Source image — your portrait / product",
+            value: source && source.name,
+            onUploaded: function (id, name) { setSource({ id: id, name: name }); },
+            onError: setErr }),
+          h(UploadSlot, { label: "🖼 Style reference — winning ad screenshot",
+            value: styleRef && styleRef.name,
+            onUploaded: function (id, name) { setStyleRef({ id: id, name: name }); },
+            onError: setErr })),
+        h("div", { className: "sl-note", style: { marginTop: 8 } },
+          "Reference images are briefly hosted on a public temp URL so the " +
+          "generator can fetch them (KIE takes URLs only)."),
+        h("div", { style: { marginTop: 10 } },
+          h("button", { className: "sl-btn sl-btn-primary",
+              disabled: busy || !brief.trim(), onClick: generate },
+            busy ? "Submitting…" : "✨ Generate the ad")),
+        !st.keys.kie
+          ? h("div", { className: "sl-err", style: { marginTop: 8 } },
+              "KIE_API_KEY is not set — add it on the Keys page (kie.ai/api-key).")
+          : null,
+        err ? h("div", { className: "sl-err" }, err) : null),
+
+      h("div", { style: { fontWeight: 800, margin: "4px 0 10px" } },
+        "Your ad creatives",
+        h("span", { className: "sl-note", style: { fontWeight: 400,
+            marginLeft: 8 } }, adsCreations.length + " creative(s)")),
+      adsCreations.length === 0
+        ? h("div", { className: "sl-card sl-note" },
+            "Nothing yet — describe your offer above and hit ✨.")
+        : adsCreations.map(function (c) {
+            var isOpen = open === c.id;
+            return h("div", { key: c.id, className: "sl-card sl-creation" },
+              h("div", { className: "sl-creation-head",
+                  onClick: function () {
+                    setOpen(isOpen ? null : c.id);
+                    if (!isOpen) loadContent(c.id);
+                  } },
+                h("span", { className: "sl-chev" + (isOpen ? " sl-chev-open" : "") }, "▸"),
+                h("span", { style: { fontWeight: 700, flex: 1 } }, c.title),
+                c.status === "generating"
+                  ? h("span", { className: "sl-busy" },
+                      h("span", { className: "sl-spin" }, "◐"), " generating")
+                  : c.status === "failed"
+                    ? h("span", { className: "sl-chip", style: { color: "#f87171" } },
+                        "failed")
+                    : h("span", { className: "sl-chip sl-active" }, "ready"),
+                c.resultUrl
+                  ? h("a", { className: "sl-link", href: c.resultUrl,
+                      target: "_blank", rel: "noreferrer",
+                      onClick: function (e) { e.stopPropagation(); } },
+                      "⬇ Open / download")
+                  : null,
+                h("button", { className: "sl-btn", style: { fontSize: 12 },
+                    onClick: function (e) { e.stopPropagation(); remove(c.id); } },
+                  "🗑"),
+                h("span", { className: "sl-note" }, fmtWhen(c.createdAt))),
+              c.status === "failed" && c.error
+                ? h("div", { className: "sl-err" }, c.error) : null,
+              isOpen && c.resultUrl
+                ? h("img", { className: "sl-result-img", src: c.resultUrl,
+                    alt: c.title })
+                : null,
+              isOpen
+                ? h("pre", { className: "sl-md" }, contents[c.id] || "Loading…")
+                : null);
+          }));
+  }
+
+  // -------------------------------------------------------------------------
+  // Page
+  // -------------------------------------------------------------------------
+  var TABS = [
+    ["research", "Shorts Research"],
+    ["content", "Shorts Content"],
+    ["adsresearch", "Ads Research"],
+    ["adslab", "Ads Lab"],
+  ];
+
+  function ShortsLabPage() {
+    var stSt = useState(null);
+    var st = stSt[0], setSt = stSt[1];
+    var errSt = useState(null);
+    var err = errSt[0], setErr = errSt[1];
+    var tabSt = useState(function () {
+      try { return localStorage.getItem("sl-tab") || "research"; }
+      catch (e) { return "research"; }
+    });
+    var tab = tabSt[0], setTab = tabSt[1];
+    var draftSt = useState("");
+    var draftBrief = draftSt[0], setDraftBrief = draftSt[1];
+    var adCtxSt = useState("");
+    var adContext = adCtxSt[0], setAdContext = adCtxSt[1];
+
+    function pickTab(t) {
+      setTab(t);
+      try { localStorage.setItem("sl-tab", t); } catch (e) {}
+    }
+
+    var refresh = useCallback(function () {
+      return api("/state")
+        .then(function (d) { setSt(d); setErr(null); })
+        .catch(function (e) { setErr(String((e && e.message) || e)); });
+    }, []);
+    useEffect(function () { refresh(); }, [refresh]);
+
+    // while a sync runs, keep the page fresh
+    var syncing = !!(st && ((st.shortsSync || {}).running ||
+                            (st.adsSync || {}).running));
+    useEffect(function () {
+      if (!syncing) return undefined;
+      var id = window.setInterval(refresh, 5000);
+      return function () { window.clearInterval(id); };
+    }, [refresh, syncing]);
+
+    // poll generating creations (KIE tasks are async)
+    var generating = (st && st.creations || []).filter(function (c) {
+      return c.status === "generating";
+    }).map(function (c) { return c.id; });
+    var genKey = generating.join(",");
+    useEffect(function () {
+      if (!genKey) return undefined;
+      var id = window.setInterval(function () {
+        genKey.split(",").forEach(function (cid) {
+          postJSON("/creations/check", { id: Number(cid) })
+            .then(function (r) { setSt(r.state); })
+            .catch(function () {});
+        });
+      }, 8000);
+      return function () { window.clearInterval(id); };
+    }, [genKey]);
+
+    if (!st) {
+      return h("div", { className: "sl-page" },
+        h("div", { style: { color: MUTED, padding: 40 } }, err || "Loading…"));
+    }
+
+    return h("div", { className: "sl-page" },
+      h("div", { className: "sl-inner" },
+        h("div", { style: { marginBottom: 14 } },
+          h("div", { style: { fontSize: 13, letterSpacing: 1.5, color: MUTED,
+                              textTransform: "uppercase" } },
+            "AI Cyber Value Creator"),
+          h("h1", { style: { fontSize: 30, margin: "4px 0 6px",
+                             fontWeight: 800 } },
+            "🎬 Shorts Lab")),
+        h("div", { className: "sl-tabs" },
+          TABS.map(function (t) {
+            return h("button", {
+              key: t[0],
+              className: "sl-pagetab" + (tab === t[0] ? " sl-pagetab-active" : ""),
+              onClick: function () { pickTab(t[0]); },
+            }, t[1]);
+          })),
+        err ? h("div", { className: "sl-err" }, err) : null,
+        tab === "research"
+          ? h(ShortsResearchTab, { st: st, onState: setSt,
+              onDraft: function (o) { setDraftBrief(o); pickTab("content"); } })
+          : tab === "content"
+            ? h(ShortsContentTab, { st: st, onState: setSt,
+                draftBrief: draftBrief })
+            : tab === "adsresearch"
+              ? h(AdsResearchTab, { st: st, onState: setSt,
+                  onUseAd: function (ctx) { setAdContext(ctx); pickTab("adslab"); } })
+              : h(AdsLabTab, { st: st, onState: setSt, adContext: adContext })));
+  }
+
+  window.__HERMES_PLUGINS__.register("shorts-lab", ShortsLabPage);
+})();

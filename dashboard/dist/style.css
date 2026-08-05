@@ -1,0 +1,202 @@
+/* Shorts Lab — theme-variable driven so every hermes theme works. */
+
+.sl-page { min-height: 100%; color: currentColor; position: relative; z-index: 1; }
+.sl-inner { padding: 28px 24px 48px; max-width: 1080px; margin: 0 auto; }
+
+.sl-card {
+  background: var(--color-card, #16162a);
+  border: 1px solid var(--color-border, #2b2b44);
+  border-radius: 12px;
+  padding: 16px 18px;
+  margin-bottom: 14px;
+}
+
+/* ---- page tabs — same underline style as YouTube Insights ---- */
+.sl-tabs {
+  display: flex; gap: 4px; flex-wrap: wrap;
+  padding: 0 0 0 2px;
+  border-bottom: 1px solid var(--color-border, #2b2b44);
+  margin-bottom: 18px;
+}
+.sl-pagetab {
+  background: transparent; border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--color-muted-foreground, #9aa0b4);
+  font-size: 14px; font-weight: 600;
+  padding: 8px 14px; cursor: pointer; font-family: inherit;
+}
+.sl-pagetab:hover { color: inherit; }
+.sl-pagetab-active {
+  color: inherit;
+  border-bottom-color: var(--color-primary, #14b8a6);
+}
+
+/* ---- pills / chips ---- */
+.sl-chip {
+  border: 1px solid var(--color-border, #2b2b44);
+  border-radius: 999px; padding: 2px 10px;
+  font-size: 11.5px; font-weight: 700;
+}
+.sl-tag {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--color-border, #2b2b44);
+  background: var(--color-card, #16162a);
+  border-radius: 999px; padding: 4px 12px;
+  font-size: 12.5px; font-weight: 700;
+}
+.sl-tag button {
+  background: none; border: none; color: inherit; cursor: pointer;
+  font-size: 12px; padding: 0; opacity: 0.7;
+}
+.sl-tag button:hover { opacity: 1; }
+.sl-pill {
+  border: 1px solid var(--color-border, #2b2b44);
+  background: transparent; color: inherit;
+  border-radius: 999px; padding: 6px 16px;
+  font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.sl-pill-on {
+  border-color: var(--color-primary, #14b8a6);
+  color: var(--color-primary, #14b8a6);
+  background: color-mix(in srgb, var(--color-primary, #14b8a6) 10%, transparent);
+}
+
+/* ---- inputs & buttons ---- */
+.sl-input {
+  width: 100%; box-sizing: border-box;
+  background: var(--color-input, #0f0f1c); color: inherit;
+  border: 1px solid var(--color-border, #2b2b44);
+  border-radius: 8px; padding: 8px 10px;
+  font-size: 13.5px; font-family: inherit; resize: vertical;
+}
+.sl-input:focus { outline: none; border-color: var(--color-primary, #14b8a6); }
+.sl-btn {
+  border: 1px solid var(--color-border, #2b2b44);
+  background: transparent; color: inherit;
+  border-radius: 8px; padding: 6px 14px;
+  font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.sl-btn:hover { border-color: var(--color-primary, #14b8a6); }
+.sl-btn:disabled { opacity: 0.5; cursor: default; }
+.sl-btn-primary {
+  border: none;
+  color: var(--color-primary-foreground, #04211c);
+  background: var(--color-primary, #14b8a6);
+}
+.sl-err { color: #f87171; font-size: 12.5px; margin-top: 8px; }
+.sl-note { color: var(--color-muted-foreground, #9aa0b4); font-size: 12.5px; }
+
+.sl-spin { display: inline-block; animation: sl-spin 1.1s linear infinite; }
+@keyframes sl-spin { to { transform: rotate(360deg); } }
+.sl-busy {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; font-weight: 700;
+  color: var(--color-primary, #14b8a6);
+}
+
+/* ---- shorts grid ---- */
+.sl-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+.sl-short {
+  background: var(--color-card, #16162a);
+  border: 1px solid var(--color-border, #2b2b44);
+  border-radius: 12px; overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.sl-short img { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; }
+.sl-short-body { padding: 10px 12px; font-size: 12.5px; }
+.sl-short-title { font-weight: 700; line-height: 1.35;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; }
+.sl-short-meta { color: var(--color-muted-foreground, #9aa0b4);
+  font-size: 11.5px; margin-top: 5px;
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.sl-views { color: var(--color-primary, #14b8a6); font-weight: 800; }
+
+/* ---- analysis panel ---- */
+.sl-list { margin: 0; padding-left: 18px; font-size: 13.5px; line-height: 1.6; }
+.sl-list li { margin-bottom: 5px; }
+.sl-h { font-size: 11.5px; font-weight: 700;
+  color: var(--color-muted-foreground, #9aa0b4);
+  text-transform: uppercase; letter-spacing: 0.06em; margin: 12px 0 4px; }
+.sl-anal-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0 22px; }
+
+/* ---- ads ---- */
+.sl-ad { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 14px; }
+.sl-days {
+  font-weight: 800; font-size: 13px;
+  color: var(--color-primary, #14b8a6); min-width: 74px;
+}
+.sl-active { color: #22c55e; }
+.sl-ended { color: var(--color-muted-foreground, #9aa0b4); }
+.sl-link {
+  color: var(--color-primary, #14b8a6);
+  text-decoration: underline; text-underline-offset: 3px; font-weight: 700;
+  font-size: 12.5px;
+}
+
+/* ---- creations ---- */
+.sl-creation { padding: 12px 16px; }
+.sl-creation-head { display: flex; align-items: center; gap: 10px;
+  flex-wrap: wrap; cursor: pointer; user-select: none; }
+.sl-chev { display: inline-block; font-size: 11px;
+  transition: transform 0.12s ease;
+  color: var(--color-muted-foreground, #9aa0b4); }
+.sl-chev-open { transform: rotate(90deg); }
+.sl-md {
+  background: var(--color-secondary, #13131f);
+  border: 1px solid var(--color-border, #2b2b44);
+  border-radius: 8px; padding: 12px 14px; margin-top: 10px;
+  font-size: 12.5px; line-height: 1.6; font-family: inherit;
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 46vh; overflow-y: auto;
+}
+.sl-result-img { max-width: 320px; width: 100%; border-radius: 10px;
+  border: 1px solid var(--color-border, #2b2b44); margin-top: 10px;
+  display: block; }
+
+/* ---- modal ---- */
+.sl-modal {
+  position: fixed; inset: 0; z-index: 80;
+  background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.sl-modal-box {
+  max-width: 560px; width: 100%;
+  background: var(--color-card, #16162a);
+  border: 1px solid color-mix(in srgb, var(--color-primary, #14b8a6) 40%, transparent);
+  border-radius: 14px; padding: 20px 22px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5);
+  max-height: 90vh; overflow-y: auto;
+}
+.sl-modal-row { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }
+
+/* ---- upload slots ---- */
+.sl-upload {
+  border: 1px dashed var(--color-border, #2b2b44);
+  border-radius: 10px; padding: 12px; text-align: center;
+  font-size: 12.5px; color: var(--color-muted-foreground, #9aa0b4);
+  cursor: pointer;
+}
+.sl-upload-on {
+  border-color: var(--color-primary, #14b8a6);
+  color: var(--color-primary, #14b8a6);
+}
+
+/* ---- ambient FX layers (standalone installs; acvc's engine owns these
+   visuals when both plugins are present) ---- */
+.sl-ambient-tint {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    radial-gradient(ellipse 80% 55% at 50% -10%,
+      color-mix(in srgb, var(--color-primary, #14b8a6) 13%, transparent), transparent),
+    radial-gradient(ellipse 60% 45% at 85% 110%,
+      color-mix(in srgb, var(--color-primary, #14b8a6) 9%, transparent), transparent);
+}
+.sl-ambient-canvas {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  width: 100vw; height: 100vh;
+}
