@@ -428,8 +428,14 @@
       });
     }
 
+    var briefRef = useRef(null);
     function generate() {
-      if (!brief.trim() || busy) return;
+      if (busy) return;
+      if (!brief.trim()) {
+        setErr("Describe the short first — one sentence about the topic is enough.");
+        if (briefRef.current) briefRef.current.focus();
+        return;
+      }
       setBusy(true); setErr(null);
       postJSON("/derivative", { brief: brief, pattern: pattern })
         .then(function (r) {
@@ -470,7 +476,7 @@
           (analysis ? "The current winning-pattern analysis rides into every draft."
                     : "Run ✨ Analyze on Shorts Research first for pattern-grounded drafts.")),
         h("textarea", {
-          className: "sl-input", rows: 3,
+          className: "sl-input", rows: 3, ref: briefRef,
           placeholder: "What is this short about? Topic, audience, the one thing viewers should take away…",
           value: brief,
           onChange: function (e) { setBrief(e.target.value); },
@@ -490,7 +496,7 @@
           : null,
         h("div", { style: { marginTop: 10 } },
           h("button", { className: "sl-btn sl-btn-primary",
-              disabled: busy || !brief.trim(), onClick: generate },
+              disabled: busy, onClick: generate },
             busy ? "Writing…" : "✨ Write the script")),
         err ? h("div", { className: "sl-err" }, err) : null),
 
@@ -540,6 +546,24 @@
   // -------------------------------------------------------------------------
   // Tab 3 — Ads Research
   // -------------------------------------------------------------------------
+  var AD_LIB = "https://www.facebook.com/ads/library/";
+  function libPageUrl(pageId) {
+    return AD_LIB + "?active_status=all&ad_type=all&country=US" +
+      "&search_type=page&view_all_page_id=" + encodeURIComponent(pageId);
+  }
+  function libTermUrl(term) {
+    return AD_LIB + "?active_status=all&ad_type=all&country=US" +
+      "&q=" + encodeURIComponent(term) + "&search_type=keyword_unordered";
+  }
+  // accepts a raw numeric page id or a pasted Ad Library URL
+  function extractPageId(text) {
+    text = String(text || "").trim();
+    var m = text.match(/view_all_page_id=(\d{5,})/);
+    if (m) return m[1];
+    if (/^\d{5,}$/.test(text)) return text;
+    return null;
+  }
+
   function AdsResearchTab(props) {
     var st = props.st;
     var qSt = useState("");
@@ -554,7 +578,14 @@
     var sync = st.adsSync || {};
 
     function search() {
-      if (!q.trim() || busy) return;
+      if (busy) return;
+      if (!q.trim()) { setErr("Type a brand name — or paste an Ad Library URL / page id."); return; }
+      var pid = extractPageId(q);
+      if (pid) {              // pasted page id or library URL — no API needed
+        monitor(pid, "Page " + pid);
+        setQ("");
+        return;
+      }
       setBusy("search"); setErr(null);
       postJSON("/ads/search", { term: q.trim() })
         .then(function (r) { setResults(r.results || []); })
@@ -596,12 +627,21 @@
             onKeyDown: function (e) { if (e.key === "Enter") search(); },
           }),
           h("button", { className: "sl-btn sl-btn-primary",
-              disabled: busy !== null || !q.trim(), onClick: search },
-            busy === "search" ? "Searching…" : "Search")),
+              disabled: busy !== null, onClick: search },
+            busy === "search" ? "Searching…" : "Search"),
+          q.trim() && !extractPageId(q)
+            ? h("a", { className: "sl-link", href: libTermUrl(q.trim()),
+                target: "_blank", rel: "noreferrer",
+                style: { alignSelf: "center" } }, "Open in Ad Library ↗")
+            : null),
+        h("div", { className: "sl-note", style: { marginTop: 8 } },
+          "No Meta token? Browse the public Ad Library with the ↗ link, " +
+          "find the competitor's page, then paste the page's library URL " +
+          "(or its view_all_page_id number) here to monitor it."),
         !st.keys.meta
           ? h("div", { className: "sl-err", style: { marginTop: 8 } },
-              "META_ACCESS_TOKEN is not set — add it on the Keys page " +
-              "(Graph API token; the Ad Library search needs it).")
+              "META_ACCESS_TOKEN is not set — name search and ad pulls " +
+              "need it (Keys page). Browsing via ↗ links works without it.")
           : null,
         err ? h("div", { className: "sl-err" }, err) : null,
         results
@@ -633,7 +673,11 @@
           h("div", { style: { fontWeight: 800 } }, "Monitored pages"),
           (st.adPages || []).map(function (p) {
             return h("span", { key: p.page_id, className: "sl-tag" },
-              p.name || p.page_id,
+              h("a", { href: libPageUrl(p.page_id), target: "_blank",
+                  rel: "noreferrer",
+                  title: "See all their ads in the public Ad Library",
+                  style: { color: "inherit", textDecoration: "none" } },
+                p.name || p.page_id),
               h("button", { title: "Stop monitoring",
                   onClick: function () { unmonitor(p.page_id); } }, "✕"));
           }),
@@ -676,7 +720,8 @@
               a.snapshot_url
                 ? h("a", { className: "sl-link", href: a.snapshot_url,
                     target: "_blank", rel: "noreferrer" }, "View creative ↗")
-                : null,
+                : h("a", { className: "sl-link", href: libPageUrl(a.page_id),
+                    target: "_blank", rel: "noreferrer" }, "Ad Library ↗"),
               h("button", { className: "sl-btn", style: { fontSize: 12 },
                   title: "Clone this winner's style with your own assets",
                   onClick: function () {
@@ -749,8 +794,14 @@
       if (props.adContext) setAdContext(props.adContext);
     }, [props.adContext]);
 
+    var briefRef = useRef(null);
     function generate() {
-      if (!brief.trim() || busy) return;
+      if (busy) return;
+      if (!brief.trim()) {
+        setErr("Describe your product/offer first — that's what the ad sells.");
+        if (briefRef.current) briefRef.current.focus();
+        return;
+      }
       setBusy(true); setErr(null);
       postJSON("/adlab/generate", {
         brief: brief, adContext: adContext,
@@ -792,7 +843,7 @@
           "Grab a screenshot of the winning creative (View creative ↗ on " +
           "Ads Research) as the style reference."),
         h("textarea", {
-          className: "sl-input", rows: 3,
+          className: "sl-input", rows: 3, ref: briefRef,
           placeholder: "Your product/offer + audience — e.g. 'AI security bootcamp for career-switchers, $497, launch week urgency'…",
           value: brief,
           onChange: function (e) { setBrief(e.target.value); },
@@ -818,7 +869,7 @@
           "generator can fetch them (KIE takes URLs only)."),
         h("div", { style: { marginTop: 10 } },
           h("button", { className: "sl-btn sl-btn-primary",
-              disabled: busy || !brief.trim(), onClick: generate },
+              disabled: busy, onClick: generate },
             busy ? "Submitting…" : "✨ Generate the ad")),
         !st.keys.kie
           ? h("div", { className: "sl-err", style: { marginTop: 8 } },
@@ -945,7 +996,7 @@
         h("div", { style: { marginBottom: 14 } },
           h("div", { style: { fontSize: 13, letterSpacing: 1.5, color: MUTED,
                               textTransform: "uppercase" } },
-            "AI Cyber Value Creator"),
+            "AI Cyber Value Creator™"),
           h("h1", { style: { fontSize: 30, margin: "4px 0 6px",
                              fontWeight: 800 } },
             "🎬 Short Form")),
