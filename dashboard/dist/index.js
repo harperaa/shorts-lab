@@ -961,9 +961,9 @@
                 a.active ? "● Active" : "ended"),
               cr.impressions && cr.impressions.indexOf("<") !== -1
                 ? h("span", { className: "sl-lowimp",
-                    title: "Low impression count — Meta reports " +
-                      cr.impressions + " impressions for this ad" },
-                    "Low impressions")
+                    title: "Meta reports " + cr.impressions +
+                      " impressions for this ad" },
+                    "Low impression count")
                 : null,
               h("span", { className: "sl-days" },
                 a.daysRunning != null ? a.daysRunning + "d" : "—"),
