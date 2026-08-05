@@ -574,8 +574,18 @@ def test_autosync_toggle_off_by_default_and_disables(home, monkeypatch):
         updates_log.append((job_id, updates))
         return jobs_by_ref[job_id]
 
+    removed = []
+
+    def remove_job(job_id):
+        job = jobs_by_ref.pop(job_id, None)
+        if job:
+            jobs_by_ref.pop(job["name"], None)
+            removed.append(job_id)
+        return True
+
     fake_jobs.create_job = create_job
     fake_jobs.update_job = update_job
+    fake_jobs.remove_job = remove_job
     fake_cron = types.ModuleType("cron")
     fake_cron.jobs = fake_jobs
     monkeypatch.setitem(sys.modules, "cron", fake_cron)
@@ -588,5 +598,12 @@ def test_autosync_toggle_off_by_default_and_disables(home, monkeypatch):
 
     out = sync_job.set_enabled(False)
     assert out["enabled"] is False and sync_job.is_enabled() is False
-    disabled = [u for _, u in updates_log if u.get("enabled") is False]
-    assert len(disabled) == 2                    # both crons turned off
+    # OFF deletes — no zombie disabled jobs left behind
+    assert len(removed) == 2
+    assert "j-shorts-lab-ads-sync" not in jobs_by_ref
+    assert "j-shorts-lab-shorts-sync" not in jobs_by_ref
+
+    # ON again recreates cleanly
+    out = sync_job.set_enabled(True)
+    assert "j-shorts-lab-ads-sync" in jobs_by_ref
+    sync_job.set_enabled(False)

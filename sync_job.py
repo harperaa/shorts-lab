@@ -160,7 +160,10 @@ def set_enabled(enabled: bool) -> dict:
             if job is None:
                 job = cron_jobs.resolve_job_ref(spec["name"])
             if job is not None:
-                cron_jobs.update_job(job["id"], {"enabled": False})
+                # OFF means gone — no zombie disabled jobs cluttering the
+                # Cron tab; enabling recreates them from scratch
+                cron_jobs.remove_job(job["id"])
+            store.kv_set(f"cronJob:{kind}", {})
     except Exception:  # noqa: BLE001 — cron absent outside hermes
         pass
     return {"enabled": False}
