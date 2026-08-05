@@ -564,6 +564,65 @@
     return null;
   }
 
+  var META_STEPS =
+    "Get a LIMITED, read-only Meta API token (~5 minutes):\n\n" +
+    "1. Go to developers.facebook.com/apps and Create App\n" +
+    "   (type: Other -> Business — no review needed for this).\n" +
+    "2. Open Tools -> Graph API Explorer\n" +
+    "   (developers.facebook.com/tools/explorer).\n" +
+    "3. Pick your new app in the Application dropdown.\n" +
+    "4. Under Permissions add ONLY ads_read — read-only, scoped to ad\n" +
+    "   accounts you can already see. Never grant ads_management for\n" +
+    "   this; researching the public Ad Library never needs write access.\n" +
+    "5. Click Generate Access Token and log in.\n" +
+    "6. Make it long-lived (~60 days): open the Access Token Debugger\n" +
+    "   (developers.facebook.com/tools/debug/accesstoken), paste the\n" +
+    "   token, hit 'Extend Access Token', and copy the extended token.\n" +
+    "7. Paste it below — it's stored in your instance's env only.\n\n" +
+    "Note: tokens expire (~60 days) — when pulls start failing, repeat\n" +
+    "steps 5-7 with the same app.";
+
+  function ConnectMetaModal(props) {
+    var keySt = useState("");
+    var keyVal = keySt[0], setKeyVal = keySt[1];
+    var busySt = useState(false);
+    var busy = busySt[0], setBusy = busySt[1];
+    var errSt = useState(null);
+    var err = errSt[0], setErr = errSt[1];
+
+    function save() {
+      if (!keyVal.trim() || busy) return;
+      setBusy(true); setErr(null);
+      postJSON("/connect", { env: "META_ACCESS_TOKEN", key: keyVal.trim() })
+        .then(function (r) { props.onState(r.state); props.onClose(); })
+        .catch(function (e) { setErr(String((e && e.message) || e)); })
+        .finally(function () { setBusy(false); });
+    }
+
+    return h("div", { className: "sl-modal", onClick: function (e) {
+          if (e.target === e.currentTarget) props.onClose();
+        } },
+      h("div", { className: "sl-modal-box" },
+        h("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 8 } },
+          "🔗 Connect Meta (read-only)"),
+        h("pre", { className: "sl-md", style: { maxHeight: "40vh",
+            marginTop: 0 } }, META_STEPS),
+        h("input", {
+          className: "sl-input", type: "password", autoFocus: true,
+          placeholder: "Paste the long-lived token (EAAB…)",
+          value: keyVal, style: { marginTop: 10 },
+          onChange: function (e) { setKeyVal(e.target.value); },
+          onKeyDown: function (e) { if (e.key === "Enter") save(); },
+        }),
+        err ? h("div", { className: "sl-err" }, err) : null,
+        h("div", { className: "sl-modal-row" },
+          h("button", { className: "sl-btn", onClick: props.onClose },
+            "Cancel"),
+          h("button", { className: "sl-btn sl-btn-primary",
+              disabled: busy || !keyVal.trim(), onClick: save },
+            busy ? "Verifying…" : "Verify & save"))));
+  }
+
   function AdsResearchTab(props) {
     var st = props.st;
     var qSt = useState("");
@@ -576,6 +635,8 @@
     var err = errSt[0], setErr = errSt[1];
 
     var sync = st.adsSync || {};
+    var connectSt = useState(false);
+    var showConnect = connectSt[0], setShowConnect = connectSt[1];
 
     function search() {
       if (busy) return;
@@ -617,8 +678,22 @@
 
     return h("div", null,
       h("div", { className: "sl-card" },
-        h("div", { style: { fontWeight: 800, marginBottom: 6 } },
-          "🔎 Find competitors in the Meta Ad Library"),
+        h("div", { style: { display: "flex", alignItems: "center", gap: 10,
+                            flexWrap: "wrap", marginBottom: 6 } },
+          h("div", { style: { fontWeight: 800, flex: 1 } },
+            "🔎 Find competitors in the Meta Ad Library"),
+          h("button", {
+              className: "sl-tag",
+              style: st.keys.meta
+                ? { color: "var(--color-primary, #14b8a6)",
+                    borderColor: "color-mix(in srgb, var(--color-primary, #14b8a6) 60%, transparent)",
+                    cursor: "pointer" }
+                : { cursor: "pointer" },
+              title: st.keys.meta
+                ? "Meta connected — click to replace the token"
+                : "Get a limited read-only token and paste it here",
+              onClick: function () { setShowConnect(true); },
+            }, st.keys.meta ? "✓ Meta connected" : "🔗 Connect Meta")),
         h("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
           h("input", {
             className: "sl-input", style: { maxWidth: 360 },
@@ -668,6 +743,10 @@
                   "No pages found for that term — try the brand's exact name."))
           : null),
 
+      showConnect
+        ? h(ConnectMetaModal, { onState: props.onState,
+            onClose: function () { setShowConnect(false); } })
+        : null,
       h("div", { className: "sl-card" },
         h("div", { style: { display: "flex", gap: 10, alignItems: "center",
                             flexWrap: "wrap" } },

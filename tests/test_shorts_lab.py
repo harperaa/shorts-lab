@@ -303,3 +303,31 @@ def test_shorts_search_tool(home):
     assert found["shorts"][0]["videoId"] == "v1"
     nothing = json.loads(analysis.tool_shorts_search({"query": "zzz"}))
     assert nothing["count"] == 0
+
+
+def test_store_key_and_validate_token(home, monkeypatch):
+    meta_ads.store_key("META_ACCESS_TOKEN", " EAAB-token-123 ")
+    env_file = (home / ".env").read_text()
+    assert "META_ACCESS_TOKEN=EAAB-token-123" in env_file
+    import os
+    assert os.environ["META_ACCESS_TOKEN"] == "EAAB-token-123"
+    # replace, never duplicate
+    meta_ads.store_key("META_ACCESS_TOKEN", "EAAB-token-456")
+    env_file = (home / ".env").read_text()
+    assert env_file.count("META_ACCESS_TOKEN=") == 1
+    assert "EAAB-token-456" in env_file
+    with pytest.raises(ValueError):
+        meta_ads.store_key("RANDOM_VAR", "x")
+    with pytest.raises(ValueError):
+        meta_ads.store_key("META_ACCESS_TOKEN", "two\nlines")
+
+    def fake_get(url, params=None, retries=3):
+        assert "/me" in url
+        if params["access_token"] == "good":
+            return {"id": "1", "name": "Allen"}
+        return {"error": {"message": "Invalid OAuth access token"}}
+
+    monkeypatch.setattr(meta_ads, "_get", fake_get)
+    assert meta_ads.validate_token("good") == {"ok": True, "name": "Allen"}
+    bad = meta_ads.validate_token("bad")
+    assert bad["ok"] is False and "Invalid" in bad["error"]

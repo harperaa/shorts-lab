@@ -187,6 +187,31 @@ def derivative(body: DerivativeBody):
     return {"ok": True, "creationId": cid, "state": _public_state()}
 
 
+class ConnectBody(BaseModel):
+    env: str = "META_ACCESS_TOKEN"
+    key: str = ""
+
+
+@router.post("/connect")
+def connect(body: ConnectBody):
+    key = (body.key or "").strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="paste the token first")
+    if body.env == "META_ACCESS_TOKEN":
+        # cheapest sanity check there is — catches truncated pastes and
+        # expired tokens before they get stored
+        check = meta_ads.validate_token(key)
+        if not check.get("ok"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Meta rejected the token: {check.get('error')}")
+    try:
+        meta_ads.store_key(body.env, key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, "state": _public_state()}
+
+
 class AdsSearchBody(BaseModel):
     term: str = ""
 

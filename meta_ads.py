@@ -185,3 +185,41 @@ def sync_all_pages(countries: str = "US") -> dict:
                                      f"{str(exc)[:150]}")
     store.kv_set("adsFetch", {"at": time.time(), "summary": summary})
     return summary
+
+
+_ALLOWED_KEYS = {"META_ACCESS_TOKEN", "KIE_API_KEY", "TRANSCRIPT_API_KEY"}
+
+
+def store_key(env_var: str, value: str) -> None:
+    """Persist a key into $HERMES_HOME/.env (replace-not-duplicate) and the
+    process env so it applies without a restart. Same pattern delivery-kit
+    uses for provider keys."""
+    value = (value or "").strip()
+    if not value or "\n" in value:
+        raise ValueError("key must be a single non-empty line")
+    if env_var not in _ALLOWED_KEYS:
+        raise ValueError(f"unknown env var: {env_var}")
+    path = store._home() / ".env"
+    lines = []
+    try:
+        lines = [l for l in path.read_text().splitlines()
+                 if not l.strip().startswith(env_var + "=")]
+    except FileNotFoundError:
+        pass
+    lines.append(f"{env_var}={value}")
+    tmp = path.with_suffix(".sl-tmp")
+    tmp.write_text("\n".join(lines) + "\n")
+    os.chmod(tmp, 0o600)
+    tmp.replace(path)
+    os.environ[env_var] = value
+
+
+def validate_token(token: str) -> dict:
+    """Sanity-check a Meta token with the cheapest call there is (/me).
+    Returns {"ok": True, "name": ...} or {"ok": False, "error": ...}."""
+    data = _get(f"{BASE_URL}/me", {"access_token": (token or "").strip(),
+                                   "fields": "id,name"})
+    if "error" in data:
+        return {"ok": False,
+                "error": str(data["error"].get("message", "invalid token"))[:200]}
+    return {"ok": True, "name": data.get("name") or data.get("id") or ""}
