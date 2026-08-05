@@ -498,3 +498,55 @@ def test_apify_pull_stores_creative_and_requests_active(home, monkeypatch):
     assert cr["cta"] == "Learn More"
     assert cr["profile"] == "https://cdn/p.jpg"
     assert cr["impressions"] == "<100"
+
+
+def test_twice_daily_sync_jobs_are_separate_and_idempotent(home, monkeypatch):
+    import types
+    sync_job = importlib.import_module(f"{PKG}.sync_job")
+    created, updated = [], []
+    jobs_by_ref = {}
+
+    fake_jobs = types.ModuleType("cron.jobs")
+
+    def resolve_job_ref(ref):
+        return jobs_by_ref.get(ref)
+
+    def create_job(prompt, schedule, name=None, deliver=None,
+                   script=None, no_agent=False, **kw):
+        job = {"id": f"job-{len(created) + 1}", "name": name,
+               "schedule": schedule, "script": script, "no_agent": no_agent}
+        jobs_by_ref[job["id"]] = job
+        jobs_by_ref[name] = job
+        created.append(job)
+        return job
+
+    def update_job(job_id, updates):
+        jobs_by_ref[job_id].update(updates)
+        updated.append(updates)
+        return jobs_by_ref[job_id]
+
+    fake_jobs.resolve_job_ref = resolve_job_ref
+    fake_jobs.create_job = create_job
+    fake_jobs.update_job = update_job
+    fake_cron = types.ModuleType("cron")
+    fake_cron.jobs = fake_jobs
+    monkeypatch.setitem(sys.modules, "cron", fake_cron)
+    monkeypatch.setitem(sys.modules, "cron.jobs", fake_jobs)
+
+    a = sync_job.ensure_ads_job()
+    b = sync_job.ensure_shorts_job()
+    assert len(created) == 2                      # two SEPARATE crons
+    assert a["jobId"] != b["jobId"]
+    assert a["schedule"] == "0 */12 * * *"        # twice a day
+    assert b["schedule"] == "30 */12 * * *"       # staggered
+    assert all(j["no_agent"] for j in created)
+
+    # generated scripts exist and compile
+    for name in ("shorts-lab-ads-sync.py", "shorts-lab-shorts-sync.py"):
+        p = home / "scripts" / name
+        assert p.exists()
+        compile(p.read_text(), str(p), "exec")
+
+    # idempotent: re-ensure updates, never duplicates
+    sync_job.ensure_ads_job()
+    assert len(created) == 2 and updated

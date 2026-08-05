@@ -48,6 +48,7 @@ store = importlib.import_module(f"{_PKG}.store")
 transcripts = importlib.import_module(f"{_PKG}.transcripts")
 meta_ads = importlib.import_module(f"{_PKG}.meta_ads")
 kie = importlib.import_module(f"{_PKG}.kie")
+sync_job = importlib.import_module(f"{_PKG}.sync_job")
 analysis = importlib.import_module(f"{_PKG}.analysis")
 
 router = APIRouter()
@@ -149,6 +150,11 @@ def channels(body: ChannelBody):
             store.remove_channel(body.handle)
         else:
             store.add_channel(body.handle)
+            # tracked channels get the twice-daily shorts refresh
+            try:
+                sync_job.ensure_shorts_job()
+            except Exception:  # noqa: BLE001 — cron absent outside hermes
+                pass
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True, "state": _public_state()}
@@ -245,6 +251,11 @@ def ads_monitor(body: MonitorBody):
     if not (body.pageId or "").strip():
         raise HTTPException(status_code=400, detail="pageId required")
     store.add_ad_page(body.pageId.strip(), body.name or body.pageId)
+    # a monitor implies ongoing interest — twice-daily cron keeps it fresh
+    try:
+        sync_job.ensure_ads_job()
+    except Exception:  # noqa: BLE001 — cron absent outside hermes (tests)
+        pass
     # keyless monitoring is a bookmark to the public Ad Library — only kick
     # a pull when a data backend exists, so no-key users never see an error
     if _has_key("APIFY_API_TOKEN") or _has_key("META_ACCESS_TOKEN"):
