@@ -956,6 +956,12 @@
               h("span", { className: "sl-chip " +
                   (a.active ? "sl-active" : "sl-ended") },
                 a.active ? "● Active" : "ended"),
+              cr.impressions && cr.impressions.indexOf("<") !== -1
+                ? h("span", { className: "sl-lowimp",
+                    title: "Meta reports " + cr.impressions +
+                      " impressions for this ad" },
+                    "Low impression count")
+                : null,
               h("span", { className: "sl-days" },
                 a.daysRunning != null ? a.daysRunning + "d" : "—"),
               h("span", { style: { flex: 1 } }),
@@ -975,15 +981,10 @@
                             style: { fontSize: 11 } }, "Platforms"),
                         platBadges(a.platforms))
                     : null,
-                  cr.impressions
-                    ? (cr.impressions.indexOf("<") !== -1
-                        ? h("span", { className: "sl-lowimp",
-                            title: "Meta reports " + cr.impressions +
-                              " impressions for this ad" },
-                            "Low impression count")
-                        : h("span", { className: "sl-note",
-                            style: { fontSize: 11 } },
-                            "👁 " + cr.impressions + " impressions"))
+                  cr.impressions && cr.impressions.indexOf("<") === -1
+                    ? h("span", { className: "sl-note",
+                        style: { fontSize: 11 } },
+                        "👁 " + cr.impressions + " impressions")
                     : null)
               : null,
             h("div", { className: "sl-adcard-id" },
