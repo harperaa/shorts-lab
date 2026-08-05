@@ -331,6 +331,16 @@ def _extract_creative(it: dict) -> dict:
 
     image = ""
     video = False
+    video_url = ""
+    for vid in (snap.get("videos") or []):
+        if isinstance(vid, dict):
+            video_url = pick(vid, "videoSdUrl", "video_sd_url",
+                             "videoHdUrl", "video_hd_url")
+            if video_url:
+                break
+    if not video_url:
+        video_url = pick(card0, "videoSdUrl", "video_sd_url",
+                         "videoHdUrl", "video_hd_url")
     for img in (snap.get("images") or []):
         if isinstance(img, dict):
             image = pick(img, "originalImageUrl", "original_image_url",
@@ -354,12 +364,13 @@ def _extract_creative(it: dict) -> dict:
             video = bool(image)
 
     return {
-        "body": str(body or "")[:600],
+        "body": str(body or "")[:2000],
         "title": str(pick(snap, "title") or pick(card0, "title"))[:200],
         "cta": str(pick(snap, "ctaText", "cta_text")
                    or pick(card0, "ctaText", "cta_text"))[:60],
         "image": str(image or "")[:1000],
-        "video": video,
+        "video": video or bool(video_url),
+        "videoUrl": str(video_url or "")[:1500],
         "profile": str(pick(snap, "pageProfilePictureUrl",
                             "page_profile_picture_url"))[:1000],
         "link": str(pick(snap, "linkUrl", "link_url")

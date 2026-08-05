@@ -680,6 +680,17 @@
     var showConnect = connectSt[0], setShowConnect = connectSt[1];
     var endedSt = useState(false);
     var showEnded = endedSt[0], setShowEnded = endedSt[1];
+    var moreSt = useState({});        // archive_id -> full text shown
+    var moreMap = moreSt[0], setMoreMap = moreSt[1];
+    var playSt = useState({});        // archive_id -> video playing
+    var playMap = playSt[0], setPlayMap = playSt[1];
+    function toggleMap(setter, id) {
+      setter(function (prev) {
+        var next = Object.assign({}, prev);
+        next[id] = !prev[id];
+        return next;
+      });
+    }
 
     function search() {
       if (busy) return;
@@ -911,14 +922,45 @@
                 h("div", { className: "sl-note",
                     style: { fontSize: 11 } }, "Sponsored"))),
             cr.body
-              ? h("div", { className: "sl-adcard-body" }, cr.body)
-              : null,
-            cr.image
-              ? h("div", { className: "sl-adcard-media" },
-                  h("img", { src: cr.image, alt: "", loading: "lazy" }),
-                  cr.video
-                    ? h("span", { className: "sl-play" }, "▶")
+              ? h(React.Fragment, null,
+                  h("div", { className: "sl-adcard-body" +
+                      (moreMap[a.archive_id] ? " sl-adcard-body-full" : "") },
+                    cr.body),
+                  cr.body.length > 140
+                    ? h("button", { className: "sl-more",
+                        onClick: function () {
+                          toggleMap(setMoreMap, a.archive_id);
+                        } },
+                        moreMap[a.archive_id] ? "less" : "more",
+                        h("span", { className: "sl-chev" +
+                            (moreMap[a.archive_id] ? " sl-chev-open" : ""),
+                            style: { marginLeft: 4 } }, "▸"))
                     : null)
+              : null,
+            cr.image || cr.videoUrl
+              ? h("div", { className: "sl-adcard-media" },
+                  playMap[a.archive_id] && cr.videoUrl
+                    ? h("video", { src: cr.videoUrl, controls: true,
+                        autoPlay: true, playsInline: true,
+                        poster: cr.image || undefined,
+                        onError: function () {
+                          toggleMap(setPlayMap, a.archive_id);
+                        } })
+                    : h(React.Fragment, null,
+                        cr.image
+                          ? h("img", { src: cr.image, alt: "",
+                              loading: "lazy" })
+                          : null,
+                        cr.videoUrl
+                          ? h("button", { className: "sl-play",
+                              title: "Play the ad video",
+                              onClick: function () {
+                                toggleMap(setPlayMap, a.archive_id);
+                              } }, "▶")
+                          : cr.video
+                            ? h("span", { className: "sl-play",
+                                style: { pointerEvents: "none" } }, "▶")
+                            : null))
               : null,
             (cr.title || cr.cta)
               ? h("div", { className: "sl-adcard-cta" },
