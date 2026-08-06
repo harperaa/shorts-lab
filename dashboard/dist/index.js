@@ -1383,11 +1383,13 @@
                           borderColor: "color-mix(in srgb, var(--color-primary, #14b8a6) 60%, transparent)",
                           cursor: "pointer" }
                       : { cursor: "pointer" },
-                    title: "This instance's own image model — no KIE or " +
-                      "imgBB keys needed",
+                    title: "This instance's own image model" +
+                      (ib.hermes && ib.hermes.provider
+                        ? " via " + ib.hermes.provider : "") +
+                      " — no KIE or imgBB keys needed",
                     onClick: function () { setBackend("hermes"); },
-                  }, "⚡ " + (ib.hermes && ib.hermes.model
-                       ? ib.hermes.model : "Instance model")),
+                  }, "⚡ " + ((ib.hermes && (ib.hermes.model ||
+                       ib.hermes.provider)) || "Instance model")),
                 h("button", {
                     className: "sl-tag",
                     style: useKie
@@ -1491,6 +1493,12 @@
             [1, 2, 3, 4, 5, 6, 8, 10, 15, 20, 30, 40, 50].map(function (n) {
               return h("option", { key: n, value: String(n) }, n);
             }))),
+        !useKie && ib.hermes && !ib.hermes.canEdit
+          ? h("div", { className: "sl-note", style: { marginTop: 8 } },
+              "⚠ This image model is text-to-image only — source and " +
+              "style images won't be applied. Switch the generator to " +
+              "KIE.ai for style cloning.")
+          : null,
         useKie && (!st.keys.kie || !st.keys.imgbb)
           ? h("div", { className: "sl-note", style: { marginTop: 8 } },
               (!st.keys.kie ? "Connect KIE above to generate. " : "") +

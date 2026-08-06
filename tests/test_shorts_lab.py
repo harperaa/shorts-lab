@@ -722,6 +722,8 @@ def test_hermes_generate_parses_tool_json(home, monkeypatch):
     fake_pkg = types.ModuleType("tools")
     fake_mod = types.ModuleType("tools.image_generation_tool")
     fake_mod.image_generate_tool = fake_tool
+    # no plugin provider configured — dispatch falls through to FAL path
+    fake_mod._dispatch_to_plugin_provider = lambda *a, **k: None
     fake_pkg.image_generation_tool = fake_mod
     monkeypatch.setitem(sys.modules, "tools", fake_pkg)
     monkeypatch.setitem(sys.modules, "tools.image_generation_tool", fake_mod)
@@ -736,3 +738,39 @@ def test_hermes_generate_parses_tool_json(home, monkeypatch):
         {"success": False, "error": "FAL_KEY is not set"})
     with pytest.raises(RuntimeError, match="FAL_KEY"):
         imagegen.hermes_generate("neon ad")
+
+    # a configured plugin provider (grok / gpt-image) short-circuits FAL
+    fake_mod._dispatch_to_plugin_provider = lambda *a, **k: json.dumps(
+        {"success": True, "image": "/opt/data/cache/images/grok_1.png"})
+    assert imagegen.hermes_generate("neon ad").endswith("grok_1.png")
+
+
+def test_status_reports_configured_plugin_provider(home, monkeypatch):
+    import types
+    fake_pkg = types.ModuleType("tools")
+    fake_mod = types.ModuleType("tools.image_generation_tool")
+    fake_mod.check_image_generation_requirements = lambda: True
+    fake_mod._active_image_capabilities = lambda: {
+        "provider": "xAI", "model": "grok-imagine-image",
+        "modalities": ["text"], "max_reference_images": 0}
+    fake_pkg.image_generation_tool = fake_mod
+    monkeypatch.setitem(sys.modules, "tools", fake_pkg)
+    monkeypatch.setitem(sys.modules, "tools.image_generation_tool", fake_mod)
+    st = imagegen.hermes_status()
+    assert st == {"available": True, "provider": "xAI",
+                  "model": "grok-imagine-image", "canEdit": False}
+
+
+def test_import_result_serves_local_plugin_output(home, tmp_path):
+    # remote URLs pass through untouched
+    pub, spell = imagegen.import_result("https://fal/x.png")
+    assert pub == spell == "https://fal/x.png"
+    # local files (xAI / gpt-image save to the hermes cache) get copied
+    # into the asset store and served from the plugin API
+    src = tmp_path / "grok_out.png"
+    src.write_bytes(b"\x89PNG-fake" * 8)
+    pub, spell = imagegen.import_result(str(src))
+    assert pub.startswith("/api/plugins/shorts-lab/asset/")
+    assert spell.startswith("data:image/png;base64,")
+    with pytest.raises(RuntimeError):
+        imagegen.import_result(str(tmp_path / "gone.png"))

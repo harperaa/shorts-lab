@@ -331,6 +331,24 @@ class AssetBody(BaseModel):
     dataBase64: str = ""
 
 
+@router.get("/asset/{asset_id}")
+def asset_get(asset_id: str):
+    """Serve a stored asset — creations generated on the instance's own
+    image model land here (their results are local files, not URLs)."""
+    if "/" in asset_id or "\\" in asset_id or ".." in asset_id:
+        raise HTTPException(status_code=400, detail="bad asset id")
+    path = store.assets_dir() / asset_id
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="asset not found")
+    import mimetypes as _mt
+    media = _mt.guess_type(asset_id)[0] or "application/octet-stream"
+    try:
+        from fastapi.responses import FileResponse
+        return FileResponse(str(path), media_type=media)
+    except Exception:  # noqa: BLE001 — test stubs without fastapi
+        return {"ok": True, "bytes": path.stat().st_size, "media": media}
+
+
 @router.post("/asset")
 def asset(body: AssetBody):
     try:
@@ -343,28 +361,31 @@ def asset(body: AssetBody):
     return {"ok": True, "assetId": aid}
 
 
-def _qa_url(url: str, ad_copy: str, regen) -> tuple:
-    """Spellcheck a finished image; regenerate up to twice on misspellings.
-    Returns (final_url, warning). Fails open when the checker can't run."""
-    warn = ""
+def _qa_pair(gen, ad_copy: str) -> tuple:
+    """Generate, spellcheck, regenerate up to twice on misspellings.
+    `gen` returns (public_url, spellcheck_url) — plugin providers save
+    local files, so the two can differ. Returns (public_url, warning);
+    fails open when the checker can't run."""
+    public, spell = gen()
     verdict = None
     for attempt in range(3):
         try:
-            verdict = analysis.spellcheck_image(url, ad_copy or "")
+            verdict = analysis.spellcheck_image(spell, ad_copy or "")
         except Exception:  # noqa: BLE001
-            return url, ""
+            return public, ""
         if verdict["ok"]:
-            return url, ""
+            return public, ""
         if attempt >= 2:
             break
         try:
-            url = regen()
+            public, spell = gen()
         except Exception:  # noqa: BLE001
             break
+    warn = ""
     if verdict is not None and not verdict["ok"]:
         warn = ("spelling issues persisted after retries: "
                 + "; ".join(verdict["issues"])[:180])
-    return url, warn
+    return public, warn
 
 
 def _hermes_batch(jobs):
@@ -374,9 +395,10 @@ def _hermes_batch(jobs):
     def worker():
         for cid, prompt, src_url, refs, ad_copy in jobs:
             try:
-                def regen():
-                    return imagegen.hermes_generate(prompt, src_url, refs)
-                url, warn = _qa_url(regen(), ad_copy, regen)
+                def gen():
+                    return imagegen.import_result(
+                        imagegen.hermes_generate(prompt, src_url, refs))
+                url, warn = _qa_pair(gen, ad_copy)
                 store.update_creation(cid, status="ready",
                                       result_url=url, error=warn)
             except Exception as exc:  # noqa: BLE001

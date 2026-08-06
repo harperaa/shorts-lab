@@ -1,9 +1,12 @@
 """Image-generation backend selection for Ads Lab.
 
 Two backends:
-  hermes  the instance's own loaded image model (hermes' FAL-backed
-          image_generate tool — grok-era instances ship FLUX/nano-banana-pro/
-          gpt-image via FAL or the managed gateway). Synchronous; local
+  hermes  whatever image model the instance itself has loaded — resolved
+          exactly the way hermes' own image_generate tool resolves it:
+          the configured plugin provider (xAI Grok Imagine, OpenAI
+          gpt-image, OpenRouter, Krea, DeepInfra, ...) when
+          image_gen.provider is set, else the in-tree FAL catalog when a
+          FAL key / managed gateway is present. Synchronous; local
           assets ride as data URIs, so NO imgBB hosting is needed.
   kie     KIE.ai jobs (async tasks) — the original path; needs imgBB for
           local assets.
@@ -27,21 +30,28 @@ logger = logging.getLogger(__name__)
 
 
 def hermes_status() -> dict:
-    """Is the instance's own image model usable, and what is it?"""
+    """Is the instance's own image model usable, and which one is it?
+
+    Mirrors hermes' own resolution: availability covers both the FAL
+    path AND an explicitly configured plugin provider (image_gen.provider
+    in config.yaml — set via `hermes tools` → Image Generation), so a
+    grok-only or gpt-image-only instance reports its model here.
+    """
     try:
         from tools.image_generation_tool import (
-            _resolve_fal_model,
-            check_fal_api_key,
+            _active_image_capabilities,
+            check_image_generation_requirements,
         )
-        available = bool(check_fal_api_key())
-        model_id, meta = _resolve_fal_model()
+        caps = _active_image_capabilities()
         return {
-            "available": available,
-            "model": meta.get("display") or model_id,
-            "canEdit": bool(meta.get("edit_endpoint")),
+            "available": bool(check_image_generation_requirements()),
+            "provider": caps.get("provider") or None,
+            "model": caps.get("model") or None,
+            "canEdit": "image" in (caps.get("modalities") or []),
         }
     except Exception:  # noqa: BLE001 — hermes internals absent (tests)
-        return {"available": False, "model": None, "canEdit": False}
+        return {"available": False, "provider": None, "model": None,
+                "canEdit": False}
 
 
 def get_backend() -> str:
@@ -64,7 +74,7 @@ def set_backend(backend: str) -> None:
 
 
 def asset_data_uri(asset_id: str) -> str:
-    """Local asset -> data URI (FAL accepts these; no public hosting)."""
+    """Local asset -> data URI (image backends accept these; no hosting)."""
     path = store.assets_dir() / asset_id
     if not path.exists():
         raise RuntimeError(f"asset {asset_id} not found")
@@ -78,19 +88,56 @@ def asset_data_uri(asset_id: str) -> str:
 def hermes_generate(prompt: str, source_url: str | None = None,
                     ref_urls: list | None = None,
                     aspect_ratio: str = "1:1") -> str:
-    """Run one generation on the instance's image model. SYNCHRONOUS —
-    returns the finished image URL or raises with the tool's error."""
-    from tools.image_generation_tool import image_generate_tool
+    """Run one generation on the instance's image model. SYNCHRONOUS.
+
+    Routing mirrors hermes' _handle_image_generate: configured plugin
+    provider first (xAI / OpenAI / ...), then the FAL path. Returns the
+    result image — a URL for FAL, usually a LOCAL FILE PATH for plugin
+    providers (they save to $HERMES_HOME/cache/images/) — or raises.
+    """
+    from tools import image_generation_tool as it
 
     refs = [u for u in (ref_urls or []) if u]
-    raw = image_generate_tool(
+    kwargs = dict(
         prompt=prompt,
         aspect_ratio=aspect_ratio,
-        image_url=source_url or None,
-        reference_image_urls=refs or None,
+        image_url=(source_url or None),
+        reference_image_urls=(refs or None),
     )
+    raw = it._dispatch_to_plugin_provider(
+        prompt, aspect_ratio, image_url=kwargs["image_url"],
+        reference_image_urls=kwargs["reference_image_urls"])
+    if raw is None and hasattr(it, "_maybe_route_managed_krea"):
+        raw = it._maybe_route_managed_krea(
+            prompt, aspect_ratio, image_url=kwargs["image_url"],
+            reference_image_urls=kwargs["reference_image_urls"])
+    if raw is None:
+        raw = it.image_generate_tool(**kwargs)
     out = json.loads(raw)
     if not out.get("success") or not out.get("image"):
         raise RuntimeError(str(out.get("error")
                                or "image generation failed")[:300])
-    return out["image"]
+    return str(out["image"])
+
+
+def import_result(image: str) -> tuple:
+    """Normalize a generation result for the dashboard.
+
+    Returns (public_url, spellcheck_url). Remote URLs pass through
+    unchanged; a local file path (plugin providers save to the hermes
+    cache) is copied into the plugin's asset store and served from the
+    plugin API, with a data URI for the vision spellcheck.
+    """
+    if image.startswith(("http://", "https://", "data:")):
+        return image, image
+    from pathlib import Path
+
+    try:
+        from . import kie
+    except ImportError:
+        import kie  # type: ignore
+    p = Path(image)
+    if not p.exists():
+        raise RuntimeError(f"generated image not found at {image}")
+    aid = kie.save_asset(p.name, p.read_bytes())
+    return f"/api/plugins/shorts-lab/asset/{aid}", asset_data_uri(aid)
