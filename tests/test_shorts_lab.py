@@ -27,6 +27,7 @@ transcripts = importlib.import_module(f"{PKG}.transcripts")
 meta_ads = importlib.import_module(f"{PKG}.meta_ads")
 kie = importlib.import_module(f"{PKG}.kie")
 analysis = importlib.import_module(f"{PKG}.analysis")
+imagegen = importlib.import_module(f"{PKG}.imagegen")
 
 
 @pytest.fixture()
@@ -665,3 +666,73 @@ def test_creation_source_updates_persist(home):
                                        "lastIssues": ["x"]})
     c = store.get_creation(cid)
     assert c["source"]["retries"] == 1 and c["source"]["lastIssues"] == ["x"]
+
+
+# ---------------------------------------------------------------------------
+# image backend selection (instance model vs KIE)
+# ---------------------------------------------------------------------------
+
+def test_backend_defaults_to_kie_without_image_model(home, monkeypatch):
+    monkeypatch.setattr(imagegen, "hermes_status",
+                        lambda: {"available": False, "model": None,
+                                 "canEdit": False})
+    assert imagegen.get_backend() == "kie"
+
+
+def test_backend_auto_prefers_loaded_model(home, monkeypatch):
+    monkeypatch.setattr(imagegen, "hermes_status",
+                        lambda: {"available": True, "model": "Grok Image",
+                                 "canEdit": True})
+    assert imagegen.get_backend() == "hermes"
+    # explicit KIE choice wins over the loaded model
+    imagegen.set_backend("kie")
+    assert imagegen.get_backend() == "kie"
+    imagegen.set_backend("auto")
+    assert imagegen.get_backend() == "hermes"
+
+
+def test_backend_hermes_choice_falls_back_when_unloaded(home, monkeypatch):
+    imagegen.set_backend("hermes")
+    monkeypatch.setattr(imagegen, "hermes_status",
+                        lambda: {"available": False, "model": None,
+                                 "canEdit": False})
+    assert imagegen.get_backend() == "kie"
+    with pytest.raises(ValueError):
+        imagegen.set_backend("dall-e")
+
+
+def test_asset_data_uri_no_hosting_needed(home):
+    aid = kie.save_asset("photo.png", b"\x89PNG-fake-bytes" * 10)
+    uri = imagegen.asset_data_uri(aid)
+    assert uri.startswith("data:image/png;base64,")
+    with pytest.raises(RuntimeError):
+        imagegen.asset_data_uri("missing.png")
+
+
+def test_hermes_generate_parses_tool_json(home, monkeypatch):
+    import types
+    calls = {}
+
+    def fake_tool(prompt, aspect_ratio="1:1", image_url=None,
+                  reference_image_urls=None):
+        calls.update(prompt=prompt, image_url=image_url,
+                     refs=reference_image_urls)
+        return json.dumps({"success": True, "image": "https://fal/x.png"})
+
+    fake_pkg = types.ModuleType("tools")
+    fake_mod = types.ModuleType("tools.image_generation_tool")
+    fake_mod.image_generate_tool = fake_tool
+    fake_pkg.image_generation_tool = fake_mod
+    monkeypatch.setitem(sys.modules, "tools", fake_pkg)
+    monkeypatch.setitem(sys.modules, "tools.image_generation_tool", fake_mod)
+
+    url = imagegen.hermes_generate("neon ad", source_url="data:image/png;a",
+                                   ref_urls=["https://style.png", ""])
+    assert url == "https://fal/x.png"
+    assert calls["image_url"] == "data:image/png;a"
+    assert calls["refs"] == ["https://style.png"]
+
+    fake_mod.image_generate_tool = lambda **k: json.dumps(
+        {"success": False, "error": "FAL_KEY is not set"})
+    with pytest.raises(RuntimeError, match="FAL_KEY"):
+        imagegen.hermes_generate("neon ad")

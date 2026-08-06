@@ -1246,6 +1246,16 @@
     var iterBusySt = useState(false);
     var iterBusy = iterBusySt[0], setIterBusy = iterBusySt[1];
 
+    var ib = st.imageBackend || {};
+    var hermesOk = !!(ib.hermes && ib.hermes.available);
+    var useKie = !hermesOk || (ib.active || "kie") === "kie";
+
+    function setBackend(backend) {
+      postJSON("/adlab/backend", { backend: backend })
+        .then(function (r) { props.onState(r.state); })
+        .catch(function (e) { setErr(String((e && e.message) || e)); });
+    }
+
     function runIterate() {
       if (!iterText.trim() || iterBusy) return;
       setIterBusy(true);
@@ -1363,7 +1373,34 @@
                             flexWrap: "wrap", marginBottom: 6 } },
           h("div", { style: { fontWeight: 800, flex: 1 } },
             "🎨 Clone a winning ad's style"),
-          h("button", {
+          hermesOk
+            ? h(React.Fragment, null,
+                h("span", { className: "sl-note" }, "generator"),
+                h("button", {
+                    className: "sl-tag",
+                    style: !useKie
+                      ? { color: "var(--color-primary, #14b8a6)",
+                          borderColor: "color-mix(in srgb, var(--color-primary, #14b8a6) 60%, transparent)",
+                          cursor: "pointer" }
+                      : { cursor: "pointer" },
+                    title: "This instance's own image model — no KIE or " +
+                      "imgBB keys needed",
+                    onClick: function () { setBackend("hermes"); },
+                  }, "⚡ " + (ib.hermes && ib.hermes.model
+                       ? ib.hermes.model : "Instance model")),
+                h("button", {
+                    className: "sl-tag",
+                    style: useKie
+                      ? { color: "var(--color-primary, #14b8a6)",
+                          borderColor: "color-mix(in srgb, var(--color-primary, #14b8a6) 60%, transparent)",
+                          cursor: "pointer" }
+                      : { cursor: "pointer" },
+                    title: "Generate on KIE.ai instead (pay-as-you-go; " +
+                      "needs the KIE + imgBB keys)",
+                    onClick: function () { setBackend("kie"); },
+                  }, "KIE.ai"))
+            : null,
+          !useKie ? null : h("button", {
               className: "sl-tag",
               style: st.keys.kie
                 ? { color: "var(--color-primary, #14b8a6)",
@@ -1375,8 +1412,8 @@
                 : "The generator — pay-as-you-go image models",
               onClick: function () { setShowConnect("kie"); },
             }, st.keys.kie ? "✓ KIE connected" : "🔗 Connect KIE"),
-          h("span", { className: "sl-note" }, "and"),
-          h("button", {
+          !useKie ? null : h("span", { className: "sl-note" }, "and"),
+          !useKie ? null : h("button", {
               className: "sl-tag",
               style: st.keys.imgbb
                 ? { color: "var(--color-primary, #14b8a6)",
@@ -1454,7 +1491,7 @@
             [1, 2, 3, 4, 5, 6, 8, 10, 15, 20, 30, 40, 50].map(function (n) {
               return h("option", { key: n, value: String(n) }, n);
             }))),
-        (!st.keys.kie || !st.keys.imgbb)
+        useKie && (!st.keys.kie || !st.keys.imgbb)
           ? h("div", { className: "sl-note", style: { marginTop: 8 } },
               (!st.keys.kie ? "Connect KIE above to generate. " : "") +
               (!st.keys.imgbb

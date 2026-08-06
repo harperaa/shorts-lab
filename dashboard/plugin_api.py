@@ -48,6 +48,7 @@ store = importlib.import_module(f"{_PKG}.store")
 transcripts = importlib.import_module(f"{_PKG}.transcripts")
 meta_ads = importlib.import_module(f"{_PKG}.meta_ads")
 kie = importlib.import_module(f"{_PKG}.kie")
+imagegen = importlib.import_module(f"{_PKG}.imagegen")
 sync_job = importlib.import_module(f"{_PKG}.sync_job")
 analysis = importlib.import_module(f"{_PKG}.analysis")
 
@@ -132,6 +133,11 @@ def _public_state() -> dict:
         },
         "adsSource": meta_ads.get_ads_source(),
         "autoSync": sync_job.is_enabled(),
+        "imageBackend": {
+            "active": imagegen.get_backend(),
+            "choice": store.kv_get("imageBackend") or "auto",
+            "hermes": imagegen.hermes_status(),
+        },
     }
 
 
@@ -337,6 +343,61 @@ def asset(body: AssetBody):
     return {"ok": True, "assetId": aid}
 
 
+def _qa_url(url: str, ad_copy: str, regen) -> tuple:
+    """Spellcheck a finished image; regenerate up to twice on misspellings.
+    Returns (final_url, warning). Fails open when the checker can't run."""
+    warn = ""
+    verdict = None
+    for attempt in range(3):
+        try:
+            verdict = analysis.spellcheck_image(url, ad_copy or "")
+        except Exception:  # noqa: BLE001
+            return url, ""
+        if verdict["ok"]:
+            return url, ""
+        if attempt >= 2:
+            break
+        try:
+            url = regen()
+        except Exception:  # noqa: BLE001
+            break
+    if verdict is not None and not verdict["ok"]:
+        warn = ("spelling issues persisted after retries: "
+                + "; ".join(verdict["issues"])[:180])
+    return url, warn
+
+
+def _hermes_batch(jobs):
+    """[(cid, prompt, source_url, refs, ad_copy)] — the instance's image
+    model is synchronous, so a daemon thread fills creations as each
+    finishes (spellcheck + retries inline)."""
+    def worker():
+        for cid, prompt, src_url, refs, ad_copy in jobs:
+            try:
+                def regen():
+                    return imagegen.hermes_generate(prompt, src_url, refs)
+                url, warn = _qa_url(regen(), ad_copy, regen)
+                store.update_creation(cid, status="ready",
+                                      result_url=url, error=warn)
+            except Exception as exc:  # noqa: BLE001
+                store.update_creation(cid, status="failed",
+                                      error=str(exc)[:300])
+    threading.Thread(target=worker, daemon=True).start()
+
+
+class ImageBackendBody(BaseModel):
+    backend: str = "auto"
+
+
+@router.post("/adlab/backend")
+def adlab_backend(body: ImageBackendBody):
+    try:
+        imagegen.set_backend((body.backend or "auto").strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, "state": _public_state()}
+
+
 class AdLabBody(BaseModel):
     brief: str = ""
     adContext: str = ""
@@ -353,15 +414,25 @@ def adlab_generate(body: AdLabBody):
         raise HTTPException(status_code=400,
                             detail="describe your product/offer first")
     n = max(1, min(50, int(body.variants or 1)))
+    backend = imagegen.get_backend()
     try:
         plan = analysis.build_ad_prompt(body.brief, body.adContext or "",
                                         variants=n)
-        source_url = (body.sourceUrl or "").strip() or (
-            kie.host_asset(body.sourceAssetId)
-            if (body.sourceAssetId or "").strip() else None)
-        style_url = (body.styleUrl or "").strip() or (
-            kie.host_asset(body.styleAssetId)
-            if (body.styleAssetId or "").strip() else None)
+        if backend == "hermes":
+            # the instance's model takes data URIs — no public hosting
+            source_url = (body.sourceUrl or "").strip() or (
+                imagegen.asset_data_uri(body.sourceAssetId)
+                if (body.sourceAssetId or "").strip() else None)
+            style_url = (body.styleUrl or "").strip() or (
+                imagegen.asset_data_uri(body.styleAssetId)
+                if (body.styleAssetId or "").strip() else None)
+        else:
+            source_url = (body.sourceUrl or "").strip() or (
+                kie.host_asset(body.sourceAssetId)
+                if (body.sourceAssetId or "").strip() else None)
+            style_url = (body.styleUrl or "").strip() or (
+                kie.host_asset(body.styleAssetId)
+                if (body.styleAssetId or "").strip() else None)
         refs = [u for u in [style_url] if u]
         prompts = [str(p) for p in (plan.get("variantPrompts") or [])
                    if str(p).strip()][:n]
@@ -376,17 +447,21 @@ def adlab_generate(body: AdLabBody):
 
     first_cid = None
     errors = []
+    hermes_jobs = []
     for i, prompt in enumerate(prompts):
-        try:
-            task_id = kie.submit_image(prompt, aspect_ratio="1:1",
-                                       source_url=source_url, ref_urls=refs)
-        except Exception as exc:  # noqa: BLE001
-            errors.append(f"variant {i + 1}: {str(exc)[:120]}")
-            continue
         title = (plan.get("title") or "Ad creative") + \
             (f" — variant {i + 1}/{n}" if n > 1 else "")
         this_copy = (copies[i] if i < len(copies)
                      else plan.get("adCopy") or "")
+        task_id = None
+        if backend == "kie":
+            try:
+                task_id = kie.submit_image(prompt, aspect_ratio="1:1",
+                                           source_url=source_url,
+                                           ref_urls=refs)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"variant {i + 1}: {str(exc)[:120]}")
+                continue
         cid = store.create_creation(
             "image-ad", title, body.brief,
             f"# {title}\n\n**Ad copy (this take):** {this_copy}\n\n"
@@ -395,17 +470,25 @@ def adlab_generate(body: AdLabBody):
             status="generating",
             source={"adContext": (body.adContext or "")[:500],
                     "prompt": prompt[:4000], "adCopy": this_copy[:500],
-                    "sourceUrl": source_url or "",
-                    "styleUrl": (refs[0] if refs else ""),
+                    "backend": backend,
+                    "sourceUrl": ("" if backend == "hermes"
+                                  else (source_url or "")),
+                    "styleUrl": ("" if backend == "hermes"
+                                 else (refs[0] if refs else "")),
                     "retries": 0})
-        store.update_creation(cid, task_id=task_id)
+        if task_id:
+            store.update_creation(cid, task_id=task_id)
+        else:
+            hermes_jobs.append((cid, prompt, source_url, refs, this_copy))
         if first_cid is None:
             first_cid = cid
+    if hermes_jobs:
+        _hermes_batch(hermes_jobs)
     if first_cid is None:
         raise HTTPException(status_code=502,
                             detail="; ".join(errors)[:300] or "all variants failed")
     return {"ok": True, "creationId": first_cid,
-            "submitted": len(prompts) - len(errors),
+            "submitted": n - len(errors), "backend": backend,
             "errors": errors, "state": _public_state()}
 
 
@@ -430,18 +513,22 @@ def adlab_iterate(body: IterateBody):
         raise HTTPException(status_code=400,
                             detail="describe the edit first")
     n = max(1, min(10, int(body.variants or 1)))
+    backend = imagegen.get_backend()
     prompt = (instruction +
               " Keep everything else in the image unchanged — same "
               "composition, text placement, colors, and identity.")
     first_cid = None
     errors = []
+    hermes_jobs = []
     for i in range(n):
-        try:
-            task_id = kie.submit_image(prompt, aspect_ratio="1:1",
-                                       source_url=c["result_url"])
-        except Exception as exc:  # noqa: BLE001
-            errors.append(f"take {i + 1}: {str(exc)[:120]}")
-            continue
+        task_id = None
+        if backend == "kie":
+            try:
+                task_id = kie.submit_image(prompt, aspect_ratio="1:1",
+                                           source_url=c["result_url"])
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"take {i + 1}: {str(exc)[:120]}")
+                continue
         title = c["title"] + " — edit" + (f" {i + 1}/{n}" if n > 1 else "")
         cid = store.create_creation(
             "image-ad", title, c.get("brief") or "",
@@ -449,11 +536,16 @@ def adlab_iterate(body: IterateBody):
             f"Iterated from creation #{c['id']} ({c['title']}).",
             status="generating",
             source={"parentId": c["id"], "instruction": instruction[:300],
-                    "prompt": prompt[:4000],
+                    "prompt": prompt[:4000], "backend": backend,
                     "sourceUrl": c["result_url"], "retries": 0})
-        store.update_creation(cid, task_id=task_id)
+        if task_id:
+            store.update_creation(cid, task_id=task_id)
+        else:
+            hermes_jobs.append((cid, prompt, c["result_url"], [], ""))
         if first_cid is None:
             first_cid = cid
+    if hermes_jobs:
+        _hermes_batch(hermes_jobs)
     if first_cid is None:
         raise HTTPException(status_code=502,
                             detail="; ".join(errors)[:300] or "iterate failed")
