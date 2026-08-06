@@ -135,6 +135,7 @@ def _public_state() -> dict:
         },
         "adsSource": meta_ads.get_ads_source(),
         "autoSync": sync_job.is_enabled(),
+        "adlabJob": _sync_state("adlabJobState"),
         "imageBackend": {
             "active": imagegen.get_backend(),
             "choice": store.kv_get("imageBackend") or "auto",
@@ -435,12 +436,21 @@ class AdLabBody(BaseModel):
 
 @router.post("/adlab/generate")
 def adlab_generate(body: AdLabBody):
+    """Kick off ad generation as a SERVER-SIDE job so it survives page
+    refreshes — the browser gets an immediate ack, the page shows the
+    running job from state (adlabJob), and creations appear as the
+    planner finishes."""
     if not (body.brief or "").strip():
         raise HTTPException(status_code=400,
                             detail="describe your product/offer first")
+    if _sync_state("adlabJobState").get("running"):
+        raise HTTPException(status_code=409,
+                            detail="a generation is already being planned — "
+                                   "let it finish first")
     n = max(1, min(50, int(body.variants or 1)))
     backend = imagegen.get_backend()
-    try:
+
+    def job():
         if backend == "hermes":
             # the instance's model takes data URIs — no public hosting
             source_url = (body.sourceUrl or "").strip() or (
@@ -470,89 +480,103 @@ def adlab_generate(body: AdLabBody):
             # model under-delivered (or n == 1) — nano is non-deterministic,
             # so repeating the base prompt still yields distinct takes
             prompts += [plan["generationPrompt"]] * (n - len(prompts))
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=str(exc)[:300])
 
-    take_sets = plan.get("copyTakesPerVariant") or []
-    post_flat = [t for t in (plan.get("postCopyVariants") or [])
-                 if isinstance(t, dict) or str(t).strip()]
-    if has_portrait:
-        # belt and braces on top of the plan-level mandate — the clause
-        # rides every prompt so retries keep it too
-        ident = (" Use the exact person from the provided source image — "
-                 "same face, hair, and identity, photorealistically "
-                 "preserved; do not generate a different or generic person.")
-        prompts = [p + ident for p in prompts]
-    first_cid = None
-    errors = []
-    hermes_jobs = []
-    for i, prompt in enumerate(prompts):
-        title = (plan.get("title") or "Ad creative") + \
-            (f" — variant {i + 1}/{n}" if n > 1 else "")
-        this_copy = (copies[i] if i < len(copies)
-                     else plan.get("adCopy") or "")
-        raw_takes = (take_sets[i] if i < len(take_sets) else None) or []
-        takes = [str(t)[:300] for t in raw_takes if str(t).strip()][:3]
-        if this_copy and this_copy not in takes:
-            takes = [this_copy[:300]] + takes[:2]
-        raw_posts = post_flat[i * 3:(i + 1) * 3] or post_flat[:3]
-        posts = []
-        for t in raw_posts[:3]:
-            if isinstance(t, dict):
-                p = {"hook": str(t.get("hook") or "")[:300],
-                     "content": str(t.get("content") or "")[:900],
-                     "cta": str(t.get("cta") or "")[:200]}
-                if p["hook"] or p["content"]:
-                    posts.append(p)
-            elif str(t).strip():          # planner fell back to plain text
-                posts.append({"hook": "", "content": str(t)[:900], "cta": ""})
-        task_id = None
-        if backend == "kie":
-            try:
-                task_id = kie.submit_image(prompt, aspect_ratio="1:1",
-                                           source_url=source_url,
-                                           ref_urls=refs)
-            except Exception as exc:  # noqa: BLE001
-                errors.append(f"variant {i + 1}: {str(exc)[:120]}")
-                continue
-        takes_md = "\n".join(
-            f"{j + 1}. {t}" for j, t in enumerate(takes)) or this_copy
-        posts_md = "\n\n".join(
-            f"**Variant {j + 1}:**\n- Hook: {t['hook']}\n"
-            f"- Content: {t['content']}\n- CTA: {t['cta']}"
-            for j, t in enumerate(posts))
-        cid = store.create_creation(
-            "image-ad", title, body.brief,
-            f"# {title}\n\n**Post copy (runs with the ad):**\n\n"
-            f"{posts_md or '(none)'}\n\n"
-            f"**In-image copy takes:**\n\n{takes_md}\n\n"
-            f"**Notes:** {plan.get('notes')}\n\n## Generation prompt\n\n"
-            f"{prompt}",
-            status="generating",
-            source={"adContext": (body.adContext or "")[:500],
-                    "prompt": prompt[:4000], "adCopy": this_copy[:500],
-                    "copyTakes": takes,
-                    "postCopy": posts,
-                    "backend": backend,
-                    "sourceUrl": ("" if backend == "hermes"
-                                  else (source_url or "")),
-                    "styleUrl": ("" if backend == "hermes"
-                                 else (refs[0] if refs else "")),
-                    "retries": 0})
-        if task_id:
-            store.update_creation(cid, task_id=task_id)
-        else:
-            hermes_jobs.append((cid, prompt, source_url, refs, this_copy))
+        take_sets = plan.get("copyTakesPerVariant") or []
+        post_flat = [t for t in (plan.get("postCopyVariants") or [])
+                     if isinstance(t, dict) or str(t).strip()]
+        if has_portrait:
+            # belt and braces on top of the plan-level mandate — the clause
+            # rides every prompt so retries keep it too
+            ident = (" Use the exact person from the provided source image — "
+                     "same face, hair, and identity, photorealistically "
+                     "preserved; do not generate a different or generic person.")
+            prompts = [p + ident for p in prompts]
+        first_cid = None
+        errors = []
+        hermes_jobs = []
+        for i, prompt in enumerate(prompts):
+            title = (plan.get("title") or "Ad creative") + \
+                (f" — variant {i + 1}/{n}" if n > 1 else "")
+            this_copy = (copies[i] if i < len(copies)
+                         else plan.get("adCopy") or "")
+            raw_takes = (take_sets[i] if i < len(take_sets) else None) or []
+            takes = [str(t)[:300] for t in raw_takes if str(t).strip()][:3]
+            if this_copy and this_copy not in takes:
+                takes = [this_copy[:300]] + takes[:2]
+            raw_posts = post_flat[i * 3:(i + 1) * 3] or post_flat[:3]
+            posts = []
+            for t in raw_posts[:3]:
+                if isinstance(t, dict):
+                    p = {"hook": str(t.get("hook") or "")[:300],
+                         "content": str(t.get("content") or "")[:900],
+                         "cta": str(t.get("cta") or "")[:200]}
+                    if p["hook"] or p["content"]:
+                        posts.append(p)
+                elif str(t).strip():          # planner fell back to plain text
+                    posts.append({"hook": "", "content": str(t)[:900], "cta": ""})
+            task_id = None
+            if backend == "kie":
+                try:
+                    task_id = kie.submit_image(prompt, aspect_ratio="1:1",
+                                               source_url=source_url,
+                                               ref_urls=refs)
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(f"variant {i + 1}: {str(exc)[:120]}")
+                    continue
+            takes_md = "\n".join(
+                f"{j + 1}. {t}" for j, t in enumerate(takes)) or this_copy
+            posts_md = "\n\n".join(
+                f"**Variant {j + 1}:**\n- Hook: {t['hook']}\n"
+                f"- Content: {t['content']}\n- CTA: {t['cta']}"
+                for j, t in enumerate(posts))
+            cid = store.create_creation(
+                "image-ad", title, body.brief,
+                f"# {title}\n\n**Post copy (runs with the ad):**\n\n"
+                f"{posts_md or '(none)'}\n\n"
+                f"**In-image copy takes:**\n\n{takes_md}\n\n"
+                f"**Notes:** {plan.get('notes')}\n\n## Generation prompt\n\n"
+                f"{prompt}",
+                status="generating",
+                source={"adContext": (body.adContext or "")[:500],
+                        "prompt": prompt[:4000], "adCopy": this_copy[:500],
+                        "copyTakes": takes,
+                        "postCopy": posts,
+                        "backend": backend,
+                        "sourceUrl": ("" if backend == "hermes"
+                                      else (source_url or "")),
+                        "styleUrl": ("" if backend == "hermes"
+                                     else (refs[0] if refs else "")),
+                        "retries": 0})
+            if task_id:
+                store.update_creation(cid, task_id=task_id)
+            else:
+                hermes_jobs.append((cid, prompt, source_url, refs, this_copy))
+            if first_cid is None:
+                first_cid = cid
+        if hermes_jobs:
+            _hermes_batch(hermes_jobs)
         if first_cid is None:
-            first_cid = cid
-    if hermes_jobs:
-        _hermes_batch(hermes_jobs)
-    if first_cid is None:
-        raise HTTPException(status_code=502,
-                            detail="; ".join(errors)[:300] or "all variants failed")
-    return {"ok": True, "creationId": first_cid,
-            "submitted": n - len(errors), "backend": backend,
-            "errors": errors, "state": _public_state()}
+            raise RuntimeError(
+                "; ".join(errors)[:300] or "all variants failed")
+        return {"created": n - len(errors), "backend": backend,
+                "errors": errors}
+
+    def worker():
+        try:
+            summary = job()
+            store.kv_set("adlabJobState",
+                         {"running": False, "finishedAt": time.time(),
+                          "summary": summary})
+        except Exception as exc:  # noqa: BLE001
+            store.kv_set("adlabJobState",
+                         {"running": False, "finishedAt": time.time(),
+                          "error": str(exc)[:300]})
+    store.kv_set("adlabJobState",
+                 {"running": True, "stage": "planning",
+                  "startedAt": time.time()})
+    threading.Thread(target=worker, daemon=True).start()
+    return {"ok": True, "started": True, "backend": backend,
+            "state": _public_state()}
 
 
 class IterateBody(BaseModel):

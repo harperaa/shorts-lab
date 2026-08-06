@@ -1276,6 +1276,8 @@
     var iterErrSt = useState(null);
     var iterErr = iterErrSt[0], setIterErr = iterErrSt[1];
 
+    var job = st.adlabJob || {};
+    var jobRunning = !!job.running;
     var ib = st.imageBackend || {};
     var hermesOk = !!(ib.hermes && ib.hermes.available);
     var useKie = !hermesOk || (ib.active || "kie") === "kie";
@@ -1337,7 +1339,7 @@
 
     var briefRef = useRef(null);
     function generate() {
-      if (busy) return;
+      if (busy || jobRunning) return;
       if (!brief.trim()) {
         setErr("Describe your product/offer first — that's what the ad sells.");
         if (briefRef.current) briefRef.current.focus();
@@ -1541,14 +1543,18 @@
         h("div", { style: { display: "flex", gap: 10, alignItems: "center",
                             marginTop: 10, flexWrap: "wrap" } },
           h("button", { className: "sl-btn sl-btn-primary",
-              disabled: busy, onClick: generate },
-            busy
+              disabled: busy || jobRunning, onClick: generate },
+            (busy || jobRunning)
               ? h(React.Fragment, null,
                   h("span", { className: "sl-spin",
                       style: { marginRight: 6 } }, "◐"),
-                  "Submitting…")
+                  jobRunning ? "Planning variants…" : "Submitting…")
               : "✨ Generate " + (variants > 1
                   ? variants + " variants" : "the ad")),
+          jobRunning
+            ? h("span", { className: "sl-note" },
+                "runs on the server — safe to leave or refresh the page")
+            : null,
           h("span", { className: "sl-note" }, "variants"),
           h("select", { className: "sl-input", style: { width: "auto" },
               value: String(variants),
@@ -1573,7 +1579,11 @@
                   "(the ad's own creative works as a style ref without it)."
                 : ""))
           : null,
-        err ? h("div", { className: "sl-err" }, err) : null),
+        err ? h("div", { className: "sl-err" }, err) : null,
+        !jobRunning && job.error
+          ? h("div", { className: "sl-err" },
+              "last generation failed: " + job.error)
+          : null),
 
       h("div", { style: { fontWeight: 800, margin: "4px 0 10px" } },
         "Your ad creatives",
@@ -1790,7 +1800,8 @@
 
     // while a sync runs, keep the page fresh
     var syncing = !!(st && ((st.shortsSync || {}).running ||
-                            (st.adsSync || {}).running));
+                            (st.adsSync || {}).running ||
+                            (st.adlabJob || {}).running));
     useEffect(function () {
       if (!syncing) return undefined;
       var id = window.setInterval(refresh, 5000);
