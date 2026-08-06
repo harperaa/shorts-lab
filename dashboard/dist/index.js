@@ -678,6 +678,41 @@
         "steps to renew."));
   }
 
+  function KieSteps() {
+    return h("ol", { className: "sl-list", style: { fontSize: 13 } },
+      h("li", null, "Create an account at ",
+        extLink("https://kie.ai", "kie.ai"),
+        " — pay-as-you-go credits power the ad generation."),
+      h("li", null, "Open ",
+        extLink("https://kie.ai/api-key", "kie.ai/api-key"),
+        " and copy your API key."),
+      h("li", null, "Paste it below — it's verified against your credit " +
+        "balance before saving."));
+  }
+
+  function ImgbbSteps() {
+    return h("ol", { className: "sl-list", style: { fontSize: 13 } },
+      h("li", null, "Create a free account at ",
+        extLink("https://imgbb.com", "imgbb.com"), "."),
+      h("li", null, "Open ",
+        extLink("https://api.imgbb.com", "api.imgbb.com"),
+        " and click Get API key — it shows instantly, no review."),
+      h("li", null, "Paste it below. Your uploaded reference images are " +
+        "hosted here at public URLs so the generator can fetch them " +
+        "(KIE takes URLs only)."));
+  }
+
+  var CONNECT_KINDS = {
+    apify: { env: "APIFY_API_TOKEN", title: "🔗 Connect Apify (easy path)",
+             steps: ApifySteps, ph: "Paste your Apify API token (apify_api_…)" },
+    meta: { env: "META_ACCESS_TOKEN", title: "🔗 Connect Meta (official API)",
+            steps: MetaSteps, ph: "Paste the long-lived token (EAAB…)" },
+    kie: { env: "KIE_API_KEY", title: "🔗 Connect KIE (the generator)",
+           steps: KieSteps, ph: "Paste your KIE API key" },
+    imgbb: { env: "IMGBB_API_KEY", title: "🔗 Connect imgBB (image hosting)",
+             steps: ImgbbSteps, ph: "Paste your imgBB API key" },
+  };
+
   function ConnectModal(props) {
     var keySt = useState("");
     var keyVal = keySt[0], setKeyVal = keySt[1];
@@ -685,13 +720,13 @@
     var busy = busySt[0], setBusy = busySt[1];
     var errSt = useState(null);
     var err = errSt[0], setErr = errSt[1];
-    var isApify = props.kind === "apify";
+    var spec = CONNECT_KINDS[props.kind] || CONNECT_KINDS.meta;
 
     function save() {
       if (!keyVal.trim() || busy) return;
       setBusy(true); setErr(null);
       postJSON("/connect", {
-        env: isApify ? "APIFY_API_TOKEN" : "META_ACCESS_TOKEN",
+        env: spec.env,
         key: keyVal.trim(),
       })
         .then(function (r) { props.onState(r.state); props.onClose(); })
@@ -704,13 +739,11 @@
         } },
       h("div", { className: "sl-modal-box" },
         h("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 8 } },
-          isApify ? "🔗 Connect Apify (easy path)"
-                  : "🔗 Connect Meta (official API)"),
-        isApify ? h(ApifySteps) : h(MetaSteps),
+          spec.title),
+        h(spec.steps),
         h("input", {
           className: "sl-input", type: "password", autoFocus: true,
-          placeholder: isApify ? "Paste your Apify API token (apify_api_…)"
-                               : "Paste the long-lived token (EAAB…)",
+          placeholder: spec.ph,
           value: keyVal, style: { marginTop: 10 },
           onChange: function (e) { setKeyVal(e.target.value); },
           onKeyDown: function (e) { if (e.key === "Enter") save(); },
@@ -1190,6 +1223,8 @@
 
   function AdsLabTab(props) {
     var st = props.st;
+    var connectSt = useState(false);
+    var showConnect = connectSt[0], setShowConnect = connectSt[1];
     var briefSt = useState("");
     var brief = briefSt[0], setBrief = briefSt[1];
     var ctxSt = useState(props.adContext || "");
@@ -1256,9 +1291,40 @@
     });
 
     return h("div", null,
+      showConnect
+        ? h(ConnectModal, { kind: showConnect, onState: props.onState,
+            onClose: function () { setShowConnect(false); } })
+        : null,
       h("div", { className: "sl-card" },
-        h("div", { style: { fontWeight: 800, marginBottom: 6 } },
-          "🎨 Clone a winning ad's style"),
+        h("div", { style: { display: "flex", alignItems: "center", gap: 10,
+                            flexWrap: "wrap", marginBottom: 6 } },
+          h("div", { style: { fontWeight: 800, flex: 1 } },
+            "🎨 Clone a winning ad's style"),
+          h("button", {
+              className: "sl-tag",
+              style: st.keys.kie
+                ? { color: "var(--color-primary, #14b8a6)",
+                    borderColor: "color-mix(in srgb, var(--color-primary, #14b8a6) 60%, transparent)",
+                    cursor: "pointer" }
+                : { cursor: "pointer" },
+              title: st.keys.kie
+                ? "KIE connected — click to replace the key"
+                : "The generator — pay-as-you-go image models",
+              onClick: function () { setShowConnect("kie"); },
+            }, st.keys.kie ? "✓ KIE connected" : "🔗 Connect KIE"),
+          h("span", { className: "sl-note" }, "and"),
+          h("button", {
+              className: "sl-tag",
+              style: st.keys.imgbb
+                ? { color: "var(--color-primary, #14b8a6)",
+                    borderColor: "color-mix(in srgb, var(--color-primary, #14b8a6) 60%, transparent)",
+                    cursor: "pointer" }
+                : { cursor: "pointer" },
+              title: st.keys.imgbb
+                ? "imgBB connected — click to replace the key"
+                : "Free image hosting for your uploaded reference images",
+              onClick: function () { setShowConnect("imgbb"); },
+            }, st.keys.imgbb ? "✓ imgBB connected" : "🔗 Connect imgBB")),
         h("div", { className: "sl-note", style: { marginBottom: 10 } },
           "The image-ad-clone method: your source image (a portrait, your " +
           "product) is converted INTO the style of the winning ad — its " +
@@ -1308,9 +1374,13 @@
           h("button", { className: "sl-btn sl-btn-primary",
               disabled: busy, onClick: generate },
             busy ? "Submitting…" : "✨ Generate the ad")),
-        !st.keys.kie
-          ? h("div", { className: "sl-err", style: { marginTop: 8 } },
-              "KIE_API_KEY is not set — add it on the Keys page (kie.ai/api-key).")
+        (!st.keys.kie || !st.keys.imgbb)
+          ? h("div", { className: "sl-note", style: { marginTop: 8 } },
+              (!st.keys.kie ? "Connect KIE above to generate. " : "") +
+              (!st.keys.imgbb
+                ? "Connect imgBB above to host your uploaded images " +
+                  "(the ad's own creative works as a style ref without it)."
+                : ""))
           : null,
         err ? h("div", { className: "sl-err" }, err) : null),
 
