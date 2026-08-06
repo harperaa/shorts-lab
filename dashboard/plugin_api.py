@@ -128,6 +128,7 @@ def _public_state() -> dict:
             "meta": _has_key("META_ACCESS_TOKEN"),
             "apify": _has_key("APIFY_API_TOKEN"),
             "kie": _has_key("KIE_API_KEY"),
+            "imgbb": _has_key("IMGBB_API_KEY"),
         },
         "adsSource": meta_ads.get_ads_source(),
         "autoSync": sync_job.is_enabled(),
@@ -234,6 +235,18 @@ def connect(body: ConnectBody):
             raise HTTPException(
                 status_code=400,
                 detail=f"Apify rejected the token: {check.get('error')}")
+    elif body.env == "KIE_API_KEY":
+        check = kie.validate_key(key)
+        if not check.get("ok"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"KIE rejected the key: {check.get('error')}")
+    elif body.env == "IMGBB_API_KEY":
+        check = kie.validate_imgbb_key(key)
+        if not check.get("ok"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"imgBB rejected the key: {check.get('error')}")
     try:
         meta_ads.store_key(body.env, key)
     except ValueError as exc:

@@ -238,3 +238,58 @@ def host_asset(asset_id: str) -> str:
     cache[sha] = entry
     store.kv_set("hostedAssets", cache)
     return hosted
+
+
+def validate_key(key: str) -> dict:
+    """Cheapest KIE auth check with an explicit key (credit balance)."""
+    req = urllib.request.Request(
+        f"{BASE_URL}/api/v1/chat/credit",
+        headers={"Authorization": f"Bearer {(key or '').strip()}",
+                 "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode())
+        if data.get("code") == 200:
+            return {"ok": True, "credits": data.get("data")}
+        return {"ok": False, "error": str(data.get("msg") or data)[:150]}
+    except urllib.error.HTTPError as exc:
+        return {"ok": False, "error": f"HTTP {exc.code} — key rejected"}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)[:150]}
+
+
+# 1x1 transparent PNG — the smallest real upload imgBB will accept
+_PROBE_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+    "0000000d49444154789c626001000000ffff03000006000557bfabd40000000049"
+    "454e44ae426082")
+
+
+def validate_imgbb_key(key: str) -> dict:
+    """imgBB has no auth-check endpoint — validate with a tiny 60s-expiry
+    probe upload."""
+    boundary = uuid.uuid4().hex
+    body = (f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="image"; '
+            f'filename="probe.png"\r\n'
+            f"Content-Type: image/png\r\n\r\n").encode() + _PROBE_PNG + \
+        f"\r\n--{boundary}--\r\n".encode()
+    url = (f"https://api.imgbb.com/1/upload?key={(key or '').strip()}"
+           "&expiration=60")
+    req = urllib.request.Request(
+        url, data=body,
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
+                 "User-Agent": "shorts-lab/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode())
+        if data.get("success"):
+            return {"ok": True}
+        return {"ok": False,
+                "error": str((data.get("error") or {}).get("message")
+                             or data)[:150]}
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:120]
+        return {"ok": False, "error": f"HTTP {exc.code}: {detail}"}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)[:150]}
