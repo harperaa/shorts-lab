@@ -507,13 +507,14 @@ def adlab_generate(body: AdLabBody):
             posts = []
             for t in raw_posts[:3]:
                 if isinstance(t, dict):
-                    p = {"hook": str(t.get("hook") or "")[:300],
-                         "content": str(t.get("content") or "")[:900],
-                         "cta": str(t.get("cta") or "")[:200]}
+                    p = {"hook": str(t.get("hook") or "")[:400],
+                         "content": str(t.get("content") or "")[:4000],
+                         "cta": str(t.get("cta") or "")[:300]}
                     if p["hook"] or p["content"]:
                         posts.append(p)
                 elif str(t).strip():          # planner fell back to plain text
-                    posts.append({"hook": "", "content": str(t)[:900], "cta": ""})
+                    posts.append(
+                        {"hook": "", "content": str(t)[:4000], "cta": ""})
             task_id = None
             if backend == "kie":
                 try:
