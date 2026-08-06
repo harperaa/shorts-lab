@@ -1239,21 +1239,29 @@
     return h(AdsLabTab, props);
   }
 
+  function loadAdLabSaved() {
+    try {
+      return JSON.parse(localStorage.getItem("sl-adlab") || "{}") || {};
+    } catch (e) { return {}; }
+  }
+
   function AdsLabTab(props) {
     var st = props.st;
+    var savedSt = useState(loadAdLabSaved);
+    var saved = savedSt[0];
     var connectSt = useState(false);
     var showConnect = connectSt[0], setShowConnect = connectSt[1];
-    var briefSt = useState("");
+    var briefSt = useState(saved.brief || "");
     var brief = briefSt[0], setBrief = briefSt[1];
-    var ctxSt = useState(props.adContext || "");
+    var ctxSt = useState(props.adContext || saved.adContext || "");
     var adContext = ctxSt[0], setAdContext = ctxSt[1];
-    var srcSt = useState(null);        // {id, name}
+    var srcSt = useState(saved.source || null);   // {id, name}
     var source = srcSt[0], setSource = srcSt[1];
-    var stySt = useState(null);
+    var stySt = useState(saved.styleRef || null);
     var styleRef = stySt[0], setStyleRef = stySt[1];
-    var adStyleSt = useState(props.adStyleUrl || "");
+    var adStyleSt = useState(props.adStyleUrl || saved.adStyle || "");
     var adStyle = adStyleSt[0], setAdStyle = adStyleSt[1];
-    var varSt = useState(1);
+    var varSt = useState(saved.variants || 1);
     var variants = varSt[0], setVariants = varSt[1];
     var iterSt = useState(null);       // creation being iterated
     var iterFor = iterSt[0], setIterFor = iterSt[1];
@@ -1300,6 +1308,21 @@
     var open = openSt[0], setOpen = openSt[1];
     var contentSt = useState({});
     var contents = contentSt[0], setContents = contentSt[1];
+
+    // survive refresh / tab switches — the Clear button resets this
+    useEffect(function () {
+      try {
+        localStorage.setItem("sl-adlab", JSON.stringify({
+          brief: brief, adContext: adContext, source: source,
+          styleRef: styleRef, adStyle: adStyle, variants: variants }));
+      } catch (e) {}
+    }, [brief, adContext, source, styleRef, adStyle, variants]);
+
+    function clearForm() {
+      setBrief(""); setAdContext(""); setSource(null);
+      setStyleRef(null); setAdStyle(""); setVariants(1); setErr(null);
+      try { localStorage.removeItem("sl-adlab"); } catch (e) {}
+    }
 
     useEffect(function () {
       if (props.adContext) setAdContext(props.adContext);
@@ -1359,7 +1382,7 @@
             } },
             h("div", { className: "sl-modal-box" },
               h("div", { style: { fontWeight: 800, fontSize: 15,
-                  marginBottom: 6 } }, "✎ Iterate: " + iterFor.title),
+                  marginBottom: 6 } }, "↻ Iterate: " + iterFor.title),
               iterFor.resultUrl
                 ? h("img", { src: iterFor.resultUrl, alt: "",
                     style: { width: 120, borderRadius: 8,
@@ -1393,7 +1416,7 @@
                         h("span", { className: "sl-spin",
                             style: { marginRight: 6 } }, "◐"),
                         "Submitting…")
-                    : "✎ Apply the edit")),
+                    : "↻ Apply the edit")),
               iterErr
                 ? h("div", { className: "sl-err", style: { marginTop: 8 } },
                     iterErr)
@@ -1404,6 +1427,11 @@
                             flexWrap: "wrap", marginBottom: 6 } },
           h("div", { style: { fontWeight: 800, flex: 1 } },
             "🎨 Clone a winning ad's style"),
+          h("button", { className: "sl-tag",
+              style: { cursor: "pointer" },
+              title: "Reset the form — brief, winning-ad context, images, " +
+                "and variant count (saved between visits until cleared)",
+              onClick: clearForm }, "✕ Reset"),
           hermesOk
             ? h(React.Fragment, null,
                 h("span", { className: "sl-note" }, "generator"),
@@ -1593,7 +1621,7 @@
                           onClick: function (e) {
                             e.stopPropagation();
                             setIterText(""); setIterN(1); setIterFor(c);
-                          } }, "✎ Iterate"))
+                          } }, "↻ Iterate"))
                   : null,
                 h("button", { className: "sl-btn", style: { fontSize: 12 },
                     onClick: function (e) { e.stopPropagation(); remove(c.id); } },
