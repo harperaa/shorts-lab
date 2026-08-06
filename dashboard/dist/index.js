@@ -1235,6 +1235,8 @@
     var styleRef = stySt[0], setStyleRef = stySt[1];
     var adStyleSt = useState(props.adStyleUrl || "");
     var adStyle = adStyleSt[0], setAdStyle = adStyleSt[1];
+    var varSt = useState(1);
+    var variants = varSt[0], setVariants = varSt[1];
     var busySt = useState(false);
     var busy = busySt[0], setBusy = busySt[1];
     var errSt = useState(null);
@@ -1265,6 +1267,7 @@
         sourceAssetId: source ? source.id : "",
         styleAssetId: styleRef ? styleRef.id : "",
         styleUrl: (!styleRef && adStyle) ? adStyle : "",
+        variants: variants,
       })
         .then(function (r) { props.onState(r.state); setOpen(r.creationId); })
         .catch(function (e) { setErr(String((e && e.message) || e)); })
@@ -1370,10 +1373,22 @@
           "Reference images are hosted briefly on imgBB (auto-deleted " +
           "after ~30 minutes) so the generator can fetch them — KIE takes " +
           "URLs only."),
-        h("div", { style: { marginTop: 10 } },
+        h("div", { style: { display: "flex", gap: 10, alignItems: "center",
+                            marginTop: 10, flexWrap: "wrap" } },
           h("button", { className: "sl-btn sl-btn-primary",
               disabled: busy, onClick: generate },
-            busy ? "Submitting…" : "✨ Generate the ad")),
+            busy ? "Submitting…"
+                 : "✨ Generate " + (variants > 1
+                     ? variants + " variants" : "the ad")),
+          h("span", { className: "sl-note" }, "variants"),
+          h("select", { className: "sl-input", style: { width: "auto" },
+              value: String(variants),
+              title: "Each variant is its own distinct generation — a " +
+                "different angle on headline, composition, or mood",
+              onChange: function (e) { setVariants(Number(e.target.value)); } },
+            [1, 2, 3, 4, 5, 6, 8, 10].map(function (n) {
+              return h("option", { key: n, value: String(n) }, n);
+            }))),
         (!st.keys.kie || !st.keys.imgbb)
           ? h("div", { className: "sl-note", style: { marginTop: 8 } },
               (!st.keys.kie ? "Connect KIE above to generate. " : "") +

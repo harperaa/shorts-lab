@@ -344,6 +344,7 @@ class AdLabBody(BaseModel):
     styleAssetId: str = ""
     sourceUrl: str = ""
     styleUrl: str = ""
+    variants: int = 1
 
 
 @router.post("/adlab/generate")
@@ -351,8 +352,10 @@ def adlab_generate(body: AdLabBody):
     if not (body.brief or "").strip():
         raise HTTPException(status_code=400,
                             detail="describe your product/offer first")
+    n = max(1, min(10, int(body.variants or 1)))
     try:
-        plan = analysis.build_ad_prompt(body.brief, body.adContext or "")
+        plan = analysis.build_ad_prompt(body.brief, body.adContext or "",
+                                        variants=n)
         source_url = (body.sourceUrl or "").strip() or (
             kie.host_asset(body.sourceAssetId)
             if (body.sourceAssetId or "").strip() else None)
@@ -360,20 +363,41 @@ def adlab_generate(body: AdLabBody):
             kie.host_asset(body.styleAssetId)
             if (body.styleAssetId or "").strip() else None)
         refs = [u for u in [style_url] if u]
-        task_id = kie.submit_image(plan["generationPrompt"],
-                                   aspect_ratio="1:1",
-                                   source_url=source_url, ref_urls=refs)
+        prompts = [str(p) for p in (plan.get("variantPrompts") or [])
+                   if str(p).strip()][:n]
+        if len(prompts) < n:
+            # model under-delivered (or n == 1) — nano is non-deterministic,
+            # so repeating the base prompt still yields distinct takes
+            prompts += [plan["generationPrompt"]] * (n - len(prompts))
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc)[:300])
-    cid = store.create_creation(
-        "image-ad", plan.get("title") or "Ad creative", body.brief,
-        f"# {plan.get('title')}\n\n**Ad copy:** {plan.get('adCopy')}\n\n"
-        f"**Notes:** {plan.get('notes')}\n\n## Generation prompt\n\n"
-        f"{plan.get('generationPrompt')}",
-        status="generating",
-        source={"adContext": (body.adContext or "")[:500]})
-    store.update_creation(cid, task_id=task_id)
-    return {"ok": True, "creationId": cid, "state": _public_state()}
+
+    first_cid = None
+    errors = []
+    for i, prompt in enumerate(prompts):
+        try:
+            task_id = kie.submit_image(prompt, aspect_ratio="1:1",
+                                       source_url=source_url, ref_urls=refs)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"variant {i + 1}: {str(exc)[:120]}")
+            continue
+        title = (plan.get("title") or "Ad creative") +             (f" — variant {i + 1}/{n}" if n > 1 else "")
+        cid = store.create_creation(
+            "image-ad", title, body.brief,
+            f"# {title}\n\n**Ad copy:** {plan.get('adCopy')}\n\n"
+            f"**Notes:** {plan.get('notes')}\n\n## Generation prompt\n\n"
+            f"{prompt}",
+            status="generating",
+            source={"adContext": (body.adContext or "")[:500]})
+        store.update_creation(cid, task_id=task_id)
+        if first_cid is None:
+            first_cid = cid
+    if first_cid is None:
+        raise HTTPException(status_code=502,
+                            detail="; ".join(errors)[:300] or "all variants failed")
+    return {"ok": True, "creationId": first_cid,
+            "submitted": len(prompts) - len(errors),
+            "errors": errors, "state": _public_state()}
 
 
 class CreationBody(BaseModel):

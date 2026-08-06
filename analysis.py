@@ -249,6 +249,14 @@ _AD_PROMPT_SCHEMA = {
                             "reference ad's composition, styling, text "
                             "placement and mood, but with the source "
                             "subject/product and the user's copy")},
+        "variantPrompts": {
+            "type": "array", "items": {"type": "string"},
+            "description": ("when N variants were requested: exactly N "
+                            "COMPLETE standalone generation prompts, each a "
+                            "distinct take — vary the headline angle, "
+                            "composition, color mood, or CTA framing — while "
+                            "keeping the source subject faithful. Empty for "
+                            "a single ad.")},
         "adCopy": {"type": "string",
                    "description": "the exact headline/text the image should carry"},
         "notes": {"type": "string",
@@ -258,13 +266,22 @@ _AD_PROMPT_SCHEMA = {
 }
 
 
-def build_ad_prompt(brief: str, ad_context: str = "") -> dict:
+def build_ad_prompt(brief: str, ad_context: str = "",
+                    variants: int = 1) -> dict:
     """Compose the style-transfer generation prompt (image-ad-clone style:
     extract what makes the winner work, re-parameterize with the user's
-    subject and offer)."""
+    subject and offer). With variants > 1, also produce that many distinct
+    standalone prompts."""
+    variants = max(1, min(10, int(variants or 1)))
     ad_note = (f"\n\nTHE WINNING AD BEING CLONED (metadata + user "
                f"description): {ad_context.strip()[:3500]}"
                if ad_context.strip() else "")
+    variant_note = (
+        f"\n\nVARIANTS REQUESTED: {variants}. Fill variantPrompts with "
+        f"exactly {variants} complete, standalone prompts — each ONE ad "
+        "image with a distinct angle (headline, composition, color mood, "
+        "CTA framing). Never ask a single image to contain multiple "
+        "variations." if variants > 1 else "")
     prompt = (
         "You are an ad creative director doing a style transfer (the "
         "image-ad-clone method): study the winning reference ad, extract "
@@ -277,7 +294,7 @@ def build_ad_prompt(brief: str, ad_context: str = "") -> dict:
         "faithful (face/product unchanged), adopt the reference's layout "
         "and styling, and render the ad copy text EXACTLY as given.\n\n"
         f"USER'S BRIEF (product/offer/audience): {brief.strip()[:2000]}"
-        + ad_note + marketing_context())
+        + ad_note + variant_note + marketing_context())
     return dict(_complete(
         "Compose one image-generation prompt that transfers a winning ad's "
         "style onto the user's own subject and offer.",

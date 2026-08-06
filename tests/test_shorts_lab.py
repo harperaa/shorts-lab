@@ -609,3 +609,25 @@ def test_autosync_toggle_off_by_default_and_disables(home, monkeypatch):
     out = sync_job.set_enabled(True)
     assert "j-shorts-lab-ads-sync" in jobs_by_ref
     sync_job.set_enabled(False)
+
+
+def test_build_ad_prompt_variants(home, monkeypatch):
+    captured = {}
+
+    class FakeRes:
+        parsed = {"title": "Bootcamp ad", "generationPrompt": "base prompt",
+                  "variantPrompts": ["take 1", "take 2", "take 3"],
+                  "adCopy": "Join now", "notes": "kept the layout"}
+
+    class FakeLlm:
+        def complete_structured(self, **kw):
+            captured["payload"] = kw["input"][0]["text"]
+            return FakeRes()
+
+    monkeypatch.setattr(analysis, "_llm", lambda: FakeLlm())
+    plan = analysis.build_ad_prompt("ai bootcamp", "winning ad", variants=3)
+    assert "VARIANTS REQUESTED: 3" in captured["payload"]
+    assert plan["variantPrompts"] == ["take 1", "take 2", "take 3"]
+    # single ad: no variant instruction
+    analysis.build_ad_prompt("ai bootcamp", "winning ad", variants=1)
+    assert "VARIANTS REQUESTED" not in captured["payload"]
