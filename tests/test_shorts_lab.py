@@ -655,7 +655,58 @@ def test_spellcheck_image_parses_verdict(home, monkeypatch):
     v = analysis.spellcheck_image("https://cdn/ad.png", "Skip the job line")
     assert captured["input"][0]["type"] == "image"
     assert captured["input"][0]["url"] == "https://cdn/ad.png"
+    assert len(captured["input"]) == 1      # no portrait -> single image
     assert v["ok"] is False and "jbo" in v["issues"][0]
+    assert v["personOk"] is True            # absent personMatch defaults ok
+
+
+def test_qa_checks_person_against_source_portrait(home, monkeypatch):
+    """Correct spelling but a DIFFERENT person than the supplied portrait
+    must fail the gate (this is what triggers the auto-retry)."""
+    captured = {}
+
+    class FakeRes:
+        parsed = {"textOk": True, "personMatch": False,
+                  "readText": "Enroll now",
+                  "issues": ["person mismatch: different woman than portrait"]}
+
+    class FakeLlm:
+        def complete_structured(self, **kw):
+            captured["input"] = kw["input"]
+            captured["instructions"] = kw["instructions"]
+            return FakeRes()
+
+    monkeypatch.setattr(analysis, "_llm", lambda: FakeLlm())
+    v = analysis.spellcheck_image("https://cdn/ad.png", "Enroll now",
+                                  source_url="data:image/png;base64,AAA")
+    assert [i["url"] for i in captured["input"]] == [
+        "https://cdn/ad.png", "data:image/png;base64,AAA"]
+    assert "reference portrait" in captured["instructions"]
+    assert v["ok"] is False and v["personOk"] is False
+    assert "person mismatch" in v["issues"][0]
+
+
+def test_build_ad_prompt_carries_identity_mandate(home, monkeypatch):
+    captured = {}
+
+    class FakeRes:
+        parsed = {"title": "t", "generationPrompt": "p", "adCopy": "c",
+                  "notes": "n"}
+
+    class FakeLlm:
+        def complete_structured(self, **kw):
+            captured["input"] = kw["input"]
+            return FakeRes()
+
+    monkeypatch.setattr(analysis, "_llm", lambda: FakeLlm())
+    analysis.build_ad_prompt("my offer", "", variants=2,
+                             has_source_image=True)
+    text = captured["input"][0]["text"]
+    assert "IDENTITY IS NON-NEGOTIABLE" in text
+    captured.clear()
+    analysis.build_ad_prompt("my offer", "", variants=1,
+                             has_source_image=False)
+    assert "IDENTITY IS NON-NEGOTIABLE" not in captured["input"][0]["text"]
 
 
 def test_creation_source_updates_persist(home):

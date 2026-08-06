@@ -361,7 +361,7 @@ def asset(body: AssetBody):
     return {"ok": True, "assetId": aid}
 
 
-def _qa_pair(gen, ad_copy: str) -> tuple:
+def _qa_pair(gen, ad_copy: str, source_spell: str = "") -> tuple:
     """Generate, spellcheck, regenerate up to twice on misspellings.
     `gen` returns (public_url, spellcheck_url) — plugin providers save
     local files, so the two can differ. Returns (public_url, warning);
@@ -370,7 +370,8 @@ def _qa_pair(gen, ad_copy: str) -> tuple:
     verdict = None
     for attempt in range(3):
         try:
-            verdict = analysis.spellcheck_image(spell, ad_copy or "")
+            verdict = analysis.spellcheck_image(spell, ad_copy or "",
+                                                source_url=source_spell or "")
         except Exception:  # noqa: BLE001
             return public, ""
         if verdict["ok"]:
@@ -383,7 +384,7 @@ def _qa_pair(gen, ad_copy: str) -> tuple:
             break
     warn = ""
     if verdict is not None and not verdict["ok"]:
-        warn = ("spelling issues persisted after retries: "
+        warn = ("QA issues persisted after retries: "
                 + "; ".join(verdict["issues"])[:180])
     return public, warn
 
@@ -398,7 +399,7 @@ def _hermes_batch(jobs):
                 def gen():
                     return imagegen.import_result(
                         imagegen.hermes_generate(prompt, src_url, refs))
-                url, warn = _qa_pair(gen, ad_copy)
+                url, warn = _qa_pair(gen, ad_copy, src_url or "")
                 store.update_creation(cid, status="ready",
                                       result_url=url, error=warn)
             except Exception as exc:  # noqa: BLE001
@@ -438,8 +439,6 @@ def adlab_generate(body: AdLabBody):
     n = max(1, min(50, int(body.variants or 1)))
     backend = imagegen.get_backend()
     try:
-        plan = analysis.build_ad_prompt(body.brief, body.adContext or "",
-                                        variants=n)
         if backend == "hermes":
             # the instance's model takes data URIs — no public hosting
             source_url = (body.sourceUrl or "").strip() or (
@@ -456,6 +455,11 @@ def adlab_generate(body: AdLabBody):
                 kie.host_asset(body.styleAssetId)
                 if (body.styleAssetId or "").strip() else None)
         refs = [u for u in [style_url] if u]
+        has_portrait = bool((body.sourceAssetId or "").strip()
+                            or (body.sourceUrl or "").strip())
+        plan = analysis.build_ad_prompt(body.brief, body.adContext or "",
+                                        variants=n,
+                                        has_source_image=has_portrait)
         prompts = [str(p) for p in (plan.get("variantPrompts") or [])
                    if str(p).strip()][:n]
         copies = [str(c) for c in (plan.get("copyVariants") or [])
@@ -467,6 +471,13 @@ def adlab_generate(body: AdLabBody):
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc)[:300])
 
+    if has_portrait:
+        # belt and braces on top of the plan-level mandate — the clause
+        # rides every prompt so retries keep it too
+        ident = (" Use the exact person from the provided source image — "
+                 "same face, hair, and identity, photorealistically "
+                 "preserved; do not generate a different or generic person.")
+        prompts = [p + ident for p in prompts]
     first_cid = None
     errors = []
     hermes_jobs = []
@@ -596,7 +607,8 @@ def creations_check(body: CreationBody):
                 # proof the rendered text BEFORE the user sees the card —
                 # fail open if the checker itself can't run
                 verdict = analysis.spellcheck_image(
-                    tick["url"], src.get("adCopy") or "")
+                    tick["url"], src.get("adCopy") or "",
+                    source_url=src.get("sourceUrl") or "")
             except Exception:  # noqa: BLE001
                 verdict = None
             if verdict is not None and not verdict["ok"] \
@@ -611,7 +623,7 @@ def creations_check(body: CreationBody):
                     src["lastIssues"] = verdict["issues"]
                     store.update_creation(
                         body.id, task_id=new_task, source=src,
-                        error="retry {}/2 — spelling issues: {}".format(
+                        error="retry {}/2 — QA issues: {}".format(
                             retries + 1,
                             "; ".join(verdict["issues"])[:150]))
                     return {"ok": True, "state": _public_state()}
@@ -619,7 +631,7 @@ def creations_check(body: CreationBody):
                     pass          # resubmit failed — fall through to ready
             warn = ""
             if verdict is not None and not verdict["ok"]:
-                warn = ("spelling issues persisted after retries: "
+                warn = ("QA issues persisted after retries: "
                         + "; ".join(verdict["issues"])[:180])
             store.update_creation(body.id, status="ready",
                                   result_url=tick["url"], error=warn)

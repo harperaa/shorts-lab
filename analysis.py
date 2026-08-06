@@ -274,7 +274,8 @@ _AD_PROMPT_SCHEMA = {
 
 
 def build_ad_prompt(brief: str, ad_context: str = "",
-                    variants: int = 1) -> dict:
+                    variants: int = 1,
+                    has_source_image: bool = False) -> dict:
     """Compose the style-transfer generation prompt (image-ad-clone style:
     extract what makes the winner work, re-parameterize with the user's
     subject and offer). With variants > 1, also produce that many distinct
@@ -292,6 +293,16 @@ def build_ad_prompt(brief: str, ad_context: str = "",
         "of copyVariants) must be a recognizable, improved descendant of "
         "the winning copy."
         if ad_context.strip() else "")
+    identity_note = (
+        "\n\nSOURCE PORTRAIT SUPPLIED — IDENTITY IS NON-NEGOTIABLE: the "
+        "person in the user's source image MUST be the person shown in the "
+        "final ad. Every generationPrompt (and every variantPrompt) must "
+        "OPEN with an explicit instruction like: 'Use the exact person from "
+        "the provided source image — same face, hair, and identity, "
+        "photorealistically preserved; do not generate a different or "
+        "generic person.' Never describe the person generically (no 'a "
+        "professional woman' etc.) — always anchor to the source image."
+        if has_source_image else "")
     variant_note = (
         f"\n\nVARIANTS REQUESTED: {variants}. Fill variantPrompts with "
         f"exactly {variants} complete, standalone prompts — each ONE ad "
@@ -311,7 +322,7 @@ def build_ad_prompt(brief: str, ad_context: str = "",
         "faithful (face/product unchanged), adopt the reference's layout "
         "and styling, and render the ad copy text EXACTLY as given.\n\n"
         f"USER'S BRIEF (product/offer/audience): {brief.strip()[:2000]}"
-        + ad_note + variant_note + marketing_context())
+        + ad_note + identity_note + variant_note + marketing_context())
     return dict(_complete(
         "Compose one image-generation prompt that transfers a winning ad's "
         "style onto the user's own subject and offer.",
@@ -355,28 +366,54 @@ _SPELLCHECK_SCHEMA = {
                                   "duplicated or mangled letters)"},
         "readText": {"type": "string",
                      "description": "the text exactly as rendered in the image"},
+        "personMatch": {
+            "type": "boolean",
+            "description": "when a reference portrait was supplied: true "
+                           "ONLY if the main person in the ad is visually "
+                           "the SAME individual as the reference portrait "
+                           "(face, hair, identity). True when no portrait "
+                           "was supplied or the ad shows no person."},
         "issues": {"type": "array", "items": {"type": "string"},
-                   "description": "each spelling/legibility problem found"},
+                   "description": "each spelling/legibility problem found, "
+                                  "plus 'person mismatch: ...' when the ad "
+                                  "shows a different individual than the "
+                                  "reference portrait"},
     },
-    "required": ["textOk", "readText", "issues"],
+    "required": ["textOk", "personMatch", "readText", "issues"],
 }
 
 
-def spellcheck_image(image_url: str, expected_copy: str = "") -> dict:
-    """Vision QA on a generated ad image. Best-effort: raises only on
-    LLM transport errors — the caller decides whether to fail open."""
+def spellcheck_image(image_url: str, expected_copy: str = "",
+                     source_url: str = "") -> dict:
+    """Vision QA on a generated ad image: spelling always; when
+    ``source_url`` is given (the user's portrait), also verify the ad
+    shows that SAME person. Best-effort: raises only on LLM transport
+    errors — the caller decides whether to fail open."""
     expected = (f"\n\nThe INTENDED ad copy was: {expected_copy.strip()!r} — "
                 "flag any deviation in spelling (wording tweaks are fine, "
                 "misspelled words are not)."
                 if (expected_copy or "").strip() else "")
+    person = ("\n\nThe SECOND image is the user's reference portrait. "
+              "personMatch=true ONLY if the main person in the ad (first "
+              "image) is visually the SAME individual — same face and "
+              "identity, not a lookalike or generic model. If it is a "
+              "different person, set personMatch=false and add an issue "
+              "starting 'person mismatch:'."
+              if (source_url or "").strip()
+              else "\n\nNo reference portrait was supplied — set "
+                   "personMatch=true.")
+    inputs = [{"type": "image", "url": image_url}]
+    if (source_url or "").strip():
+        inputs.append({"type": "image", "url": source_url.strip()})
     import re
     res = _llm().complete_structured(
         instructions=(
             "You are proofing an AI-generated ad image. Read EVERY piece of "
             "rendered text. textOk=true only if all words are correctly "
             "spelled and cleanly legible — gibberish glyphs, mangled or "
-            "duplicated letters, and misspellings all fail." + expected),
-        input=[{"type": "image", "url": image_url}],
+            "duplicated letters, and misspellings all fail."
+            + expected + person),
+        input=inputs,
         json_schema=_SPELLCHECK_SCHEMA,
         schema_name="ad_spellcheck",
         temperature=0.0,
@@ -391,6 +428,9 @@ def spellcheck_image(image_url: str, expected_copy: str = "") -> dict:
         parsed = json.loads(m.group(0)) if m else None
     if not isinstance(parsed, dict):
         raise RuntimeError("spellcheck returned nothing usable")
-    return {"ok": bool(parsed.get("textOk")),
+    person_ok = bool(parsed.get("personMatch", True))
+    return {"ok": bool(parsed.get("textOk")) and person_ok,
+            "textOk": bool(parsed.get("textOk")),
+            "personOk": person_ok,
             "readText": str(parsed.get("readText") or "")[:300],
             "issues": [str(i)[:120] for i in (parsed.get("issues") or [])][:5]}

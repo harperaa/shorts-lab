@@ -1187,9 +1187,10 @@
     var inputRef = useRef(null);
     var busySt = useState(false);
     var busy = busySt[0], setBusy = busySt[1];
+    var dragSt = useState(false);
+    var dragOver = dragSt[0], setDragOver = dragSt[1];
 
-    function onFile(e) {
-      var f = e.target.files && e.target.files[0];
+    function takeFile(f) {
       if (!f) return;
       setBusy(true);
       var reader = new FileReader();
@@ -1205,16 +1206,33 @@
       reader.readAsDataURL(f);
     }
 
+    function onFile(e) {
+      takeFile(e.target.files && e.target.files[0]);
+    }
+
     return h("div", {
         className: "sl-upload" + (props.value ? " sl-upload-on" : ""),
-        style: { flex: 1, minWidth: 200 },
+        style: Object.assign({ flex: 1, minWidth: 200 },
+          dragOver ? { borderColor: "var(--color-primary, #14b8a6)",
+                       background: "color-mix(in srgb, var(--color-primary, #14b8a6) 8%, transparent)" }
+                   : null),
         onClick: function () {
           if (inputRef.current) inputRef.current.click();
+        },
+        onDragOver: function (e) { e.preventDefault(); setDragOver(true); },
+        onDragLeave: function () { setDragOver(false); },
+        onDrop: function (e) {
+          e.preventDefault();
+          setDragOver(false);
+          var f = e.dataTransfer && e.dataTransfer.files &&
+                  e.dataTransfer.files[0];
+          if (f && /^image\//.test(f.type || "")) takeFile(f);
         } },
       h("input", { type: "file", accept: "image/*",
         style: { display: "none" }, ref: inputRef, onChange: onFile }),
       busy ? "Uploading…"
-           : (props.value ? "✓ " + props.value : props.label));
+           : (props.value ? "✓ " + props.value
+                          : props.label + " — click or drop"));
   }
 
   function AdLabTabWrap(props) {
@@ -1245,6 +1263,8 @@
     var iterN = iterNSt[0], setIterN = iterNSt[1];
     var iterBusySt = useState(false);
     var iterBusy = iterBusySt[0], setIterBusy = iterBusySt[1];
+    var iterErrSt = useState(null);
+    var iterErr = iterErrSt[0], setIterErr = iterErrSt[1];
 
     var ib = st.imageBackend || {};
     var hermesOk = !!(ib.hermes && ib.hermes.available);
@@ -1259,11 +1279,18 @@
     function runIterate() {
       if (!iterText.trim() || iterBusy) return;
       setIterBusy(true);
+      setIterErr(null);
       postJSON("/adlab/iterate", { id: iterFor.id, instruction: iterText,
                                    variants: iterN })
-        .then(function (r) { props.onState(r.state); setIterFor(null); })
-        .catch(function (e) { setErr(String((e && e.message) || e)); })
-        .finally(function () { setIterBusy(false); setIterText(""); });
+        .then(function (r) {
+          props.onState(r.state);
+          setIterFor(null);
+          setIterText("");
+        })
+        .catch(function (e) {
+          setIterErr(String((e && e.message) || e));
+        })
+        .finally(function () { setIterBusy(false); });
     }
     var busySt = useState(false);
     var busy = busySt[0], setBusy = busySt[1];
@@ -1366,7 +1393,11 @@
                         h("span", { className: "sl-spin",
                             style: { marginRight: 6 } }, "◐"),
                         "Submitting…")
-                    : "✎ Apply the edit"))))
+                    : "✎ Apply the edit")),
+              iterErr
+                ? h("div", { className: "sl-err", style: { marginTop: 8 } },
+                    iterErr)
+                : null))
         : null,
       h("div", { className: "sl-card" },
         h("div", { style: { display: "flex", alignItems: "center", gap: 10,
@@ -1515,7 +1546,20 @@
       h("div", { style: { fontWeight: 800, margin: "4px 0 10px" } },
         "Your ad creatives",
         h("span", { className: "sl-note", style: { fontWeight: 400,
-            marginLeft: 8 } }, adsCreations.length + " creative(s)")),
+            marginLeft: 8 } }, adsCreations.length + " creative(s)"),
+        (function () {
+          var gen = adsCreations.filter(function (c) {
+            return c.status === "generating";
+          }).length;
+          return gen
+            ? h("span", { style: { marginLeft: 10, fontWeight: 700,
+                  fontSize: 12.5,
+                  color: "var(--color-primary, #14b8a6)" } },
+                h("span", { className: "sl-spin",
+                    style: { marginRight: 5 } }, "◐"),
+                gen + " in progress")
+            : null;
+        })()),
       adsCreations.length === 0
         ? h("div", { className: "sl-card sl-note" },
             "Nothing yet — describe your offer above and hit ✨.")
