@@ -338,3 +338,59 @@ def tool_shorts_search(args: dict) -> str:
             "transcript": (s.get("transcript") or "")[:800]}
            for s in shorts]
     return json.dumps({"count": len(out), "shorts": out})
+
+
+# ---------------------------------------------------------------------------
+# Image text QA — read the rendered ad and catch misspellings before the
+# user ever sees the creative
+# ---------------------------------------------------------------------------
+
+_SPELLCHECK_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "textOk": {"type": "boolean",
+                   "description": "true ONLY if every word rendered in the "
+                                  "image is correctly spelled and cleanly "
+                                  "legible (no gibberish glyphs, no "
+                                  "duplicated or mangled letters)"},
+        "readText": {"type": "string",
+                     "description": "the text exactly as rendered in the image"},
+        "issues": {"type": "array", "items": {"type": "string"},
+                   "description": "each spelling/legibility problem found"},
+    },
+    "required": ["textOk", "readText", "issues"],
+}
+
+
+def spellcheck_image(image_url: str, expected_copy: str = "") -> dict:
+    """Vision QA on a generated ad image. Best-effort: raises only on
+    LLM transport errors — the caller decides whether to fail open."""
+    expected = (f"\n\nThe INTENDED ad copy was: {expected_copy.strip()!r} — "
+                "flag any deviation in spelling (wording tweaks are fine, "
+                "misspelled words are not)."
+                if (expected_copy or "").strip() else "")
+    import re
+    res = _llm().complete_structured(
+        instructions=(
+            "You are proofing an AI-generated ad image. Read EVERY piece of "
+            "rendered text. textOk=true only if all words are correctly "
+            "spelled and cleanly legible — gibberish glyphs, mangled or "
+            "duplicated letters, and misspellings all fail." + expected),
+        input=[{"type": "image", "url": image_url}],
+        json_schema=_SPELLCHECK_SCHEMA,
+        schema_name="ad_spellcheck",
+        temperature=0.0,
+        max_tokens=500,
+        timeout=120,
+        purpose="shorts-lab-ad-spellcheck",
+    )
+    parsed = getattr(res, "parsed", None)
+    if parsed is None:
+        raw = getattr(res, "text", "") or ""
+        m = re.search(r"\{.*\}", raw, re.DOTALL)
+        parsed = json.loads(m.group(0)) if m else None
+    if not isinstance(parsed, dict):
+        raise RuntimeError("spellcheck returned nothing usable")
+    return {"ok": bool(parsed.get("textOk")),
+            "readText": str(parsed.get("readText") or "")[:300],
+            "issues": [str(i)[:120] for i in (parsed.get("issues") or [])][:5]}

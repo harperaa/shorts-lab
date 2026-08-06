@@ -393,7 +393,11 @@ def adlab_generate(body: AdLabBody):
             f"**Notes:** {plan.get('notes')}\n\n## Generation prompt\n\n"
             f"{prompt}",
             status="generating",
-            source={"adContext": (body.adContext or "")[:500]})
+            source={"adContext": (body.adContext or "")[:500],
+                    "prompt": prompt[:4000], "adCopy": this_copy[:500],
+                    "sourceUrl": source_url or "",
+                    "styleUrl": (refs[0] if refs else ""),
+                    "retries": 0})
         store.update_creation(cid, task_id=task_id)
         if first_cid is None:
             first_cid = cid
@@ -403,6 +407,57 @@ def adlab_generate(body: AdLabBody):
     return {"ok": True, "creationId": first_cid,
             "submitted": len(prompts) - len(errors),
             "errors": errors, "state": _public_state()}
+
+
+class IterateBody(BaseModel):
+    id: int = 0
+    instruction: str = ""
+    variants: int = 1
+
+
+@router.post("/adlab/iterate")
+def adlab_iterate(body: IterateBody):
+    """Edit a produced image: the creation's result becomes the new source
+    and the user's instruction is the edit — no LLM planning round-trip."""
+    c = store.get_creation(body.id)
+    if not c:
+        raise HTTPException(status_code=404, detail="creation not found")
+    if not (c.get("result_url") or "").strip():
+        raise HTTPException(status_code=409,
+                            detail="that creation has no image yet")
+    instruction = (body.instruction or "").strip()
+    if not instruction:
+        raise HTTPException(status_code=400,
+                            detail="describe the edit first")
+    n = max(1, min(10, int(body.variants or 1)))
+    prompt = (instruction +
+              " Keep everything else in the image unchanged — same "
+              "composition, text placement, colors, and identity.")
+    first_cid = None
+    errors = []
+    for i in range(n):
+        try:
+            task_id = kie.submit_image(prompt, aspect_ratio="1:1",
+                                       source_url=c["result_url"])
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"take {i + 1}: {str(exc)[:120]}")
+            continue
+        title = c["title"] + " — edit" + (f" {i + 1}/{n}" if n > 1 else "")
+        cid = store.create_creation(
+            "image-ad", title, c.get("brief") or "",
+            f"# {title}\n\n**Edit instruction:** {instruction}\n\n"
+            f"Iterated from creation #{c['id']} ({c['title']}).",
+            status="generating",
+            source={"parentId": c["id"], "instruction": instruction[:300],
+                    "prompt": prompt[:4000],
+                    "sourceUrl": c["result_url"], "retries": 0})
+        store.update_creation(cid, task_id=task_id)
+        if first_cid is None:
+            first_cid = cid
+    if first_cid is None:
+        raise HTTPException(status_code=502,
+                            detail="; ".join(errors)[:300] or "iterate failed")
+    return {"ok": True, "creationId": first_cid, "state": _public_state()}
 
 
 class CreationBody(BaseModel):
@@ -420,8 +475,40 @@ def creations_check(body: CreationBody):
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=502, detail=str(exc)[:200])
         if tick["state"] == "success":
+            src = dict(c.get("source") or {})
+            retries = int(src.get("retries") or 0)
+            verdict = None
+            try:
+                # proof the rendered text BEFORE the user sees the card —
+                # fail open if the checker itself can't run
+                verdict = analysis.spellcheck_image(
+                    tick["url"], src.get("adCopy") or "")
+            except Exception:  # noqa: BLE001
+                verdict = None
+            if verdict is not None and not verdict["ok"] \
+                    and src.get("prompt") and retries < 2:
+                # misspelled render: bin it and resubmit the same prompt
+                try:
+                    new_task = kie.submit_image(
+                        src["prompt"], aspect_ratio="1:1",
+                        source_url=src.get("sourceUrl") or None,
+                        ref_urls=[u for u in [src.get("styleUrl")] if u])
+                    src["retries"] = retries + 1
+                    src["lastIssues"] = verdict["issues"]
+                    store.update_creation(
+                        body.id, task_id=new_task, source=src,
+                        error="retry {}/2 — spelling issues: {}".format(
+                            retries + 1,
+                            "; ".join(verdict["issues"])[:150]))
+                    return {"ok": True, "state": _public_state()}
+                except Exception:  # noqa: BLE001
+                    pass          # resubmit failed — fall through to ready
+            warn = ""
+            if verdict is not None and not verdict["ok"]:
+                warn = ("spelling issues persisted after retries: "
+                        + "; ".join(verdict["issues"])[:180])
             store.update_creation(body.id, status="ready",
-                                  result_url=tick["url"])
+                                  result_url=tick["url"], error=warn)
         elif tick["state"] == "fail":
             store.update_creation(body.id, status="failed",
                                   error=tick.get("error") or "failed")

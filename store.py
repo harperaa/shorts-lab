@@ -327,10 +327,12 @@ def create_creation(kind: str, title: str, brief: str, content: str = "",
 
 def update_creation(cid: int, **fields) -> None:
     allowed = {"title", "brief", "content", "status", "task_id",
-               "result_url", "error"}
+               "result_url", "error", "source"}
     sets, vals = [], []
     for k, v in fields.items():
         if k in allowed:
+            if k == "source" and isinstance(v, dict):
+                v = json.dumps(v)
             sets.append(f"{k}=?")
             vals.append(v)
     if not sets:

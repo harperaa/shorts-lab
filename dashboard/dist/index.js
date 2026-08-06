@@ -1237,6 +1237,24 @@
     var adStyle = adStyleSt[0], setAdStyle = adStyleSt[1];
     var varSt = useState(1);
     var variants = varSt[0], setVariants = varSt[1];
+    var iterSt = useState(null);       // creation being iterated
+    var iterFor = iterSt[0], setIterFor = iterSt[1];
+    var iterTextSt = useState("");
+    var iterText = iterTextSt[0], setIterText = iterTextSt[1];
+    var iterNSt = useState(1);
+    var iterN = iterNSt[0], setIterN = iterNSt[1];
+    var iterBusySt = useState(false);
+    var iterBusy = iterBusySt[0], setIterBusy = iterBusySt[1];
+
+    function runIterate() {
+      if (!iterText.trim() || iterBusy) return;
+      setIterBusy(true);
+      postJSON("/adlab/iterate", { id: iterFor.id, instruction: iterText,
+                                   variants: iterN })
+        .then(function (r) { props.onState(r.state); setIterFor(null); })
+        .catch(function (e) { setErr(String((e && e.message) || e)); })
+        .finally(function () { setIterBusy(false); setIterText(""); });
+    }
     var busySt = useState(false);
     var busy = busySt[0], setBusy = busySt[1];
     var errSt = useState(null);
@@ -1297,6 +1315,48 @@
       showConnect
         ? h(ConnectModal, { kind: showConnect, onState: props.onState,
             onClose: function () { setShowConnect(false); } })
+        : null,
+      iterFor
+        ? h("div", { className: "sl-modal", onClick: function (e) {
+              if (e.target === e.currentTarget) setIterFor(null);
+            } },
+            h("div", { className: "sl-modal-box" },
+              h("div", { style: { fontWeight: 800, fontSize: 15,
+                  marginBottom: 6 } }, "✎ Iterate: " + iterFor.title),
+              iterFor.resultUrl
+                ? h("img", { src: iterFor.resultUrl, alt: "",
+                    style: { width: 120, borderRadius: 8,
+                             marginBottom: 8 } })
+                : null,
+              h("div", { className: "sl-note", style: { marginBottom: 8 } },
+                "Your instruction edits THIS image — everything else " +
+                "stays as rendered."),
+              h("textarea", { className: "sl-input", rows: 3,
+                  autoFocus: true,
+                  placeholder: "e.g. make the headline larger and move it above my head; swap the red accents to teal…",
+                  value: iterText,
+                  onChange: function (e) { setIterText(e.target.value); } }),
+              h("div", { style: { display: "flex", gap: 8,
+                  alignItems: "center", marginTop: 8 } },
+                h("span", { className: "sl-note" }, "takes"),
+                h("select", { className: "sl-input",
+                    style: { width: "auto" }, value: String(iterN),
+                    onChange: function (e) { setIterN(Number(e.target.value)); } },
+                  [1, 2, 3, 4].map(function (n) {
+                    return h("option", { key: n, value: String(n) }, n);
+                  }))),
+              h("div", { className: "sl-modal-row" },
+                h("button", { className: "sl-btn",
+                    onClick: function () { setIterFor(null); } }, "Cancel"),
+                h("button", { className: "sl-btn sl-btn-primary",
+                    disabled: iterBusy || !iterText.trim(),
+                    onClick: runIterate },
+                  iterBusy
+                    ? h(React.Fragment, null,
+                        h("span", { className: "sl-spin",
+                            style: { marginRight: 6 } }, "◐"),
+                        "Submitting…")
+                    : "✎ Apply the edit"))))
         : null,
       h("div", { className: "sl-card" },
         h("div", { style: { display: "flex", alignItems: "center", gap: 10,
@@ -1429,10 +1489,19 @@
                         "failed")
                     : h("span", { className: "sl-chip sl-active" }, "ready"),
                 c.resultUrl
-                  ? h("a", { className: "sl-link", href: c.resultUrl,
-                      target: "_blank", rel: "noreferrer",
-                      onClick: function (e) { e.stopPropagation(); } },
-                      "⬇ Open / download")
+                  ? h(React.Fragment, null,
+                      h("a", { className: "sl-link", href: c.resultUrl,
+                          target: "_blank", rel: "noreferrer",
+                          onClick: function (e) { e.stopPropagation(); } },
+                          "⬇ Open / download"),
+                      h("button", { className: "sl-btn",
+                          style: { fontSize: 12 },
+                          title: "Edit this image — your instruction runs " +
+                            "against this exact render",
+                          onClick: function (e) {
+                            e.stopPropagation();
+                            setIterText(""); setIterN(1); setIterFor(c);
+                          } }, "✎ Iterate"))
                   : null,
                 h("button", { className: "sl-btn", style: { fontSize: 12 },
                     onClick: function (e) { e.stopPropagation(); remove(c.id); } },
@@ -1440,6 +1509,10 @@
                 h("span", { className: "sl-note" }, fmtWhen(c.createdAt))),
               c.status === "failed" && c.error
                 ? h("div", { className: "sl-err" }, c.error) : null,
+              c.status === "ready" && c.error
+                ? h("div", { style: { color: "#f59e0b", fontSize: 12,
+                    padding: "0 4px" } }, "⚠ " + c.error)
+                : null,
               isOpen && c.resultUrl
                 ? h("img", { className: "sl-result-img", src: c.resultUrl,
                     alt: c.title })

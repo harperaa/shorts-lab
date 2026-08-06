@@ -636,3 +636,32 @@ def test_build_ad_prompt_variants(home, monkeypatch):
     # single ad: no variant instruction
     analysis.build_ad_prompt("ai bootcamp", "winning ad", variants=1)
     assert "VARIANTS REQUESTED" not in captured["payload"]
+
+
+def test_spellcheck_image_parses_verdict(home, monkeypatch):
+    captured = {}
+
+    class FakeRes:
+        parsed = {"textOk": False, "readText": "Skip the jbo line",
+                  "issues": ["'jbo' should be 'job'"]}
+
+    class FakeLlm:
+        def complete_structured(self, **kw):
+            captured["input"] = kw["input"]
+            return FakeRes()
+
+    monkeypatch.setattr(analysis, "_llm", lambda: FakeLlm())
+    v = analysis.spellcheck_image("https://cdn/ad.png", "Skip the job line")
+    assert captured["input"][0]["type"] == "image"
+    assert captured["input"][0]["url"] == "https://cdn/ad.png"
+    assert v["ok"] is False and "jbo" in v["issues"][0]
+
+
+def test_creation_source_updates_persist(home):
+    cid = store.create_creation("image-ad", "Ad", "brief", "c",
+                                status="generating",
+                                source={"prompt": "p", "retries": 0})
+    store.update_creation(cid, source={"prompt": "p", "retries": 1,
+                                       "lastIssues": ["x"]})
+    c = store.get_creation(cid)
+    assert c["source"]["retries"] == 1 and c["source"]["lastIssues"] == ["x"]
