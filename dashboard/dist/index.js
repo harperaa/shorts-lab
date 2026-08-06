@@ -1301,8 +1301,9 @@
                   onClick: function () { setAdStyle(""); } }, "✕"))
           : null,
         h("div", { className: "sl-note", style: { marginTop: 8 } },
-          "Reference images are briefly hosted on a public temp URL so the " +
-          "generator can fetch them (KIE takes URLs only)."),
+          "Reference images are hosted via imgBB so the generator can " +
+          "fetch them (KIE takes URLs only) — needs a free IMGBB_API_KEY " +
+          "from api.imgbb.com on the Keys page."),
         h("div", { style: { marginTop: 10 } },
           h("button", { className: "sl-btn sl-btn-primary",
               disabled: busy, onClick: generate },

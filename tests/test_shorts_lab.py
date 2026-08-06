@@ -199,12 +199,12 @@ def test_kie_submit_shapes(home, monkeypatch):
 
     monkeypatch.setattr(kie, "_post_json", fake_post)
 
-    # edit mode: source first, style refs follow, edit model
+    # edit mode: source first, style refs follow — live-verified strings
     tid = kie.submit_image("make it pop", source_url="https://h/src.jpg",
                            ref_urls=["https://h/style.jpg"])
     assert tid == "t-123"
-    assert sent["body"]["model"] == "nano-banana-edit"
-    assert sent["body"]["input"]["image_input"] == [
+    assert sent["body"]["model"] == "google/nano-banana-edit"
+    assert sent["body"]["input"]["image_urls"] == [
         "https://h/src.jpg", "https://h/style.jpg"]
 
     # fresh mode: aspect ratio, default model

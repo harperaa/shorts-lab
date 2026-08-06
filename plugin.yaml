@@ -25,6 +25,10 @@ requires_env:
     description: "KIE.ai API key — powers Ads Lab image generation and Shorts Content renders"
     url: "https://kie.ai/api-key"
     secret: true
+  - name: IMGBB_API_KEY
+    description: "imgBB API key (free) — hosts your uploaded reference images at public URLs the generator can fetch"
+    url: "https://api.imgbb.com"
+    secret: true
 
 provides_tools:
   - shorts_search

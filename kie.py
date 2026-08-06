@@ -6,8 +6,8 @@ Facts (verified against the kit + docs.kie.ai):
 - GET  /api/v1/jobs/recordInfo?taskId=...  -> state, resultJson (JSON string)
   containing resultUrls
 - Bearer KIE_API_KEY; reference images must be PUBLIC URLs (no upload flow),
-  so local assets are hosted via 0x0.st (the kit's recommended temp host)
-  just long enough for KIE to fetch them.
+  so local assets are hosted via imgBB — the kit's proven uploader
+  (scripts/imgbb-upload.sh); 0x0.st shut off uploads entirely.
 """
 from __future__ import annotations
 
@@ -27,8 +27,12 @@ except ImportError:  # loaded outside package context
     import store  # type: ignore
 
 BASE_URL = os.environ.get("KIE_BASE_URL", "https://api.kie.ai")
-IMAGE_MODEL = "nano-banana-2"        # fresh generation
-EDIT_MODEL = "nano-banana-edit"      # source image + style refs
+# Model strings verified against the live marketplace 2026-08-06 — KIE's
+# catalog is MIXED: fresh generation keeps the bare string + image_input,
+# while the edit model moved to the google/ prefix + image_urls. The old
+# bare "nano-banana-edit" now 422s ("model name not supported").
+IMAGE_MODEL = "nano-banana-2"              # fresh generation (image_input)
+EDIT_MODEL = "google/nano-banana-edit"     # source + style refs (image_urls)
 
 # appended to ad prompts, straight from the kit's hard-won suffixes
 NO_CHROME_SUFFIX = (" No phone UI chrome, no status bar, no app frame unless"
@@ -94,10 +98,13 @@ def submit_image(prompt: str, aspect_ratio: str = "9:16",
     if source_url:
         model = EDIT_MODEL
         inputs: dict = {"prompt": final_prompt,
-                        "image_input": [source_url] + refs}
+                        "image_urls": [source_url] + refs,
+                        "output_format": "png",
+                        "aspect_ratio": aspect_ratio or "auto"}
     else:
         model = IMAGE_MODEL
-        inputs = {"prompt": final_prompt, "aspect_ratio": aspect_ratio}
+        inputs = {"prompt": final_prompt, "aspect_ratio": aspect_ratio,
+                  "output_format": "png"}
         if refs:
             inputs["image_input"] = refs
     resp = _post_json(f"{BASE_URL}/api/v1/jobs/createTask",
@@ -156,30 +163,78 @@ def save_asset(filename: str, payload: bytes) -> str:
 
 
 def host_asset(asset_id: str) -> str:
-    """Push a stored asset to 0x0.st (the kit's recommended temp host) so
-    KIE can fetch it; returns the public URL. Cached per asset."""
-    cache = store.kv_get("hostedAssets") or {}
-    if asset_id in cache:
-        return cache[asset_id]
+    """Host a stored asset on imgBB (the ad-builder kit's proven uploader —
+    0x0.st shut off uploads) and return the public URL KIE can fetch.
+
+    Ported from the kit's scripts/imgbb-upload.sh: sha256 content cache,
+    optional IMGBB_EXPIRATION auto-delete, and a 900s safety margin so a
+    cached URL never dies while KIE's queue is still fetching it."""
+    import hashlib
+    import time as _time
+
     path = store.assets_dir() / asset_id
     if not path.exists():
         raise RuntimeError(f"asset {asset_id} not found")
     payload = path.read_bytes()
+    if len(payload) > 32 * 1024 * 1024:
+        raise RuntimeError("asset too large for imgBB (32 MB max)")
+
+    key = ""
+    for var in ("IMGBB_API_KEY", "IMAGBB_API_KEY"):   # kit accepts the typo
+        key = (os.environ.get(var) or "").strip()
+        if not key:
+            try:
+                for line in (store._home() / ".env").read_text().splitlines():
+                    if line.strip().startswith(var + "="):
+                        key = line.split("=", 1)[1].strip()
+                        break
+            except OSError:
+                pass
+        if key:
+            break
+    if not key:
+        raise RuntimeError("IMGBB_API_KEY not set — grab a free key at "
+                           "api.imgbb.com and add it on the Keys page "
+                           "(reference images must be publicly hosted for "
+                           "the generator)")
+
+    sha = hashlib.sha256(payload).hexdigest()
+    now = _time.time()
+    cache = store.kv_get("hostedAssets") or {}
+    hit = cache.get(sha)
+    if isinstance(hit, dict):
+        exp = hit.get("expiresAt")
+        if hit.get("url") and (not exp or exp > now + 900):
+            return hit["url"]
+
     boundary = uuid.uuid4().hex
     ctype = mimetypes.guess_type(asset_id)[0] or "image/jpeg"
     body = (f"--{boundary}\r\n"
-            f'Content-Disposition: form-data; name="file"; '
+            f'Content-Disposition: form-data; name="image"; '
             f'filename="{asset_id}"\r\n'
             f"Content-Type: {ctype}\r\n\r\n").encode() + payload + \
         f"\r\n--{boundary}--\r\n".encode()
+    url = f"https://api.imgbb.com/1/upload?key={key}"
+    expiration = (os.environ.get("IMGBB_EXPIRATION") or "").strip()
+    if expiration:
+        url += f"&expiration={expiration}"
     req = urllib.request.Request(
-        "https://0x0.st", data=body,
+        url, data=body,
         headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
                  "User-Agent": "shorts-lab/1.0 (hermes plugin)"})
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        url = resp.read().decode().strip()
-    if not url.startswith("http"):
-        raise RuntimeError(f"asset hosting failed: {url[:200]}")
-    cache[asset_id] = url
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            data = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:200]
+        raise RuntimeError(f"imgBB upload failed (HTTP {exc.code}): {detail}")
+    if not data.get("success"):
+        err = (data.get("error") or {}).get("message") or str(data)[:200]
+        raise RuntimeError(f"imgBB upload failed: {err}")
+    hosted = data["data"]["url"]
+    entry = {"url": hosted, "at": now}
+    if expiration:
+        entry["expiresAt"] = now + int(expiration)
+    cache[sha] = entry
     store.kv_set("hostedAssets", cache)
-    return url
+    return hosted
