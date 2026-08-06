@@ -258,9 +258,16 @@ _AD_PROMPT_SCHEMA = {
                             "keeping the source subject faithful. Empty for "
                             "a single ad.")},
         "adCopy": {"type": "string",
-                   "description": "the exact headline/text the image should carry"},
+                   "description": "the exact headline/text the image should carry — an IMPROVED derivative of the winning ad's copy, never an unrelated invention"},
+        "copyVariants": {
+            "type": "array", "items": {"type": "string"},
+            "description": ("when N variants were requested: exactly N "
+                            "improved copy takes derived from the winning "
+                            "ad's copy — same persuasion mechanics, varied "
+                            "hook/angle/CTA — one per variant prompt, in "
+                            "the same order")},
         "notes": {"type": "string",
-                  "description": "one or two sentences for the user on what was carried over from the winning ad"},
+                  "description": "one or two sentences: which mechanics of the winning copy were kept, and how each take varies it"},
     },
     "required": ["title", "generationPrompt", "adCopy", "notes"],
 }
@@ -273,15 +280,25 @@ def build_ad_prompt(brief: str, ad_context: str = "",
     subject and offer). With variants > 1, also produce that many distinct
     standalone prompts."""
     variants = max(1, min(10, int(variants or 1)))
-    ad_note = (f"\n\nTHE WINNING AD BEING CLONED (metadata + user "
-               f"description): {ad_context.strip()[:3500]}"
-               if ad_context.strip() else "")
+    ad_note = (
+        f"\n\nTHE WINNING AD BEING CLONED (metadata + full copy): "
+        f"{ad_context.strip()[:3500]}"
+        "\n\nTHE WINNING COPY IS RAW MATERIAL — the whole point of "
+        "handing it over. Dissect WHY it works (hook mechanics, tension, "
+        "promise, CTA), then WRITE IMPROVED VARIATIONS of it: same "
+        "persuasion mechanics and voice, adapted to the user's offer, "
+        "tightened where the original rambles. Never ignore it and invent "
+        "unrelated copy; never repeat it verbatim. adCopy (and each entry "
+        "of copyVariants) must be a recognizable, improved descendant of "
+        "the winning copy."
+        if ad_context.strip() else "")
     variant_note = (
         f"\n\nVARIANTS REQUESTED: {variants}. Fill variantPrompts with "
         f"exactly {variants} complete, standalone prompts — each ONE ad "
         "image with a distinct angle (headline, composition, color mood, "
-        "CTA framing). Never ask a single image to contain multiple "
-        "variations." if variants > 1 else "")
+        "CTA framing) — and copyVariants with the matching improved copy "
+        "take for each, in the same order. Never ask a single image to "
+        "contain multiple variations." if variants > 1 else "")
     prompt = (
         "You are an ad creative director doing a style transfer (the "
         "image-ad-clone method): study the winning reference ad, extract "

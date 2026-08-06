@@ -365,6 +365,8 @@ def adlab_generate(body: AdLabBody):
         refs = [u for u in [style_url] if u]
         prompts = [str(p) for p in (plan.get("variantPrompts") or [])
                    if str(p).strip()][:n]
+        copies = [str(c) for c in (plan.get("copyVariants") or [])
+                  if str(c).strip()][:n]
         if len(prompts) < n:
             # model under-delivered (or n == 1) — nano is non-deterministic,
             # so repeating the base prompt still yields distinct takes
@@ -381,10 +383,13 @@ def adlab_generate(body: AdLabBody):
         except Exception as exc:  # noqa: BLE001
             errors.append(f"variant {i + 1}: {str(exc)[:120]}")
             continue
-        title = (plan.get("title") or "Ad creative") +             (f" — variant {i + 1}/{n}" if n > 1 else "")
+        title = (plan.get("title") or "Ad creative") + \
+            (f" — variant {i + 1}/{n}" if n > 1 else "")
+        this_copy = (copies[i] if i < len(copies)
+                     else plan.get("adCopy") or "")
         cid = store.create_creation(
             "image-ad", title, body.brief,
-            f"# {title}\n\n**Ad copy:** {plan.get('adCopy')}\n\n"
+            f"# {title}\n\n**Ad copy (this take):** {this_copy}\n\n"
             f"**Notes:** {plan.get('notes')}\n\n## Generation prompt\n\n"
             f"{prompt}",
             status="generating",

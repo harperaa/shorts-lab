@@ -617,6 +617,7 @@ def test_build_ad_prompt_variants(home, monkeypatch):
     class FakeRes:
         parsed = {"title": "Bootcamp ad", "generationPrompt": "base prompt",
                   "variantPrompts": ["take 1", "take 2", "take 3"],
+                  "copyVariants": ["copy A", "copy B", "copy C"],
                   "adCopy": "Join now", "notes": "kept the layout"}
 
     class FakeLlm:
@@ -627,7 +628,11 @@ def test_build_ad_prompt_variants(home, monkeypatch):
     monkeypatch.setattr(analysis, "_llm", lambda: FakeLlm())
     plan = analysis.build_ad_prompt("ai bootcamp", "winning ad", variants=3)
     assert "VARIANTS REQUESTED: 3" in captured["payload"]
+    # the winning copy must be treated as raw material, not背景 noise
+    assert "RAW MATERIAL" in captured["payload"]
+    assert "improved descendant" in captured["payload"]
     assert plan["variantPrompts"] == ["take 1", "take 2", "take 3"]
+    assert plan["copyVariants"] == ["copy A", "copy B", "copy C"]
     # single ad: no variant instruction
     analysis.build_ad_prompt("ai bootcamp", "winning ad", variants=1)
     assert "VARIANTS REQUESTED" not in captured["payload"]
