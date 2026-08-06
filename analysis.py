@@ -279,7 +279,7 @@ def build_ad_prompt(brief: str, ad_context: str = "",
     extract what makes the winner work, re-parameterize with the user's
     subject and offer). With variants > 1, also produce that many distinct
     standalone prompts."""
-    variants = max(1, min(10, int(variants or 1)))
+    variants = max(1, min(50, int(variants or 1)))
     ad_note = (
         f"\n\nTHE WINNING AD BEING CLONED (metadata + full copy): "
         f"{ad_context.strip()[:3500]}"

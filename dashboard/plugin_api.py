@@ -352,7 +352,7 @@ def adlab_generate(body: AdLabBody):
     if not (body.brief or "").strip():
         raise HTTPException(status_code=400,
                             detail="describe your product/offer first")
-    n = max(1, min(10, int(body.variants or 1)))
+    n = max(1, min(50, int(body.variants or 1)))
     try:
         plan = analysis.build_ad_prompt(body.brief, body.adContext or "",
                                         variants=n)

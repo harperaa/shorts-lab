@@ -1377,16 +1377,21 @@
                             marginTop: 10, flexWrap: "wrap" } },
           h("button", { className: "sl-btn sl-btn-primary",
               disabled: busy, onClick: generate },
-            busy ? "Submitting…"
-                 : "✨ Generate " + (variants > 1
-                     ? variants + " variants" : "the ad")),
+            busy
+              ? h(React.Fragment, null,
+                  h("span", { className: "sl-spin",
+                      style: { marginRight: 6 } }, "◐"),
+                  "Submitting…")
+              : "✨ Generate " + (variants > 1
+                  ? variants + " variants" : "the ad")),
           h("span", { className: "sl-note" }, "variants"),
           h("select", { className: "sl-input", style: { width: "auto" },
               value: String(variants),
-              title: "Each variant is its own distinct generation — a " +
-                "different angle on headline, composition, or mood",
+              title: "Each variant is its own distinct generation (and its " +
+                "own KIE charge) — a different angle on headline, " +
+                "composition, or mood",
               onChange: function (e) { setVariants(Number(e.target.value)); } },
-            [1, 2, 3, 4, 5, 6, 8, 10].map(function (n) {
+            [1, 2, 3, 4, 5, 6, 8, 10, 15, 20, 30, 40, 50].map(function (n) {
               return h("option", { key: n, value: String(n) }, n);
             }))),
         (!st.keys.kie || !st.keys.imgbb)
