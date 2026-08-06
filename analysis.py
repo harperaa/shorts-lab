@@ -266,6 +266,36 @@ _AD_PROMPT_SCHEMA = {
                             "ad's copy — same persuasion mechanics, varied "
                             "hook/angle/CTA — one per variant prompt, in "
                             "the same order")},
+        "postCopyPerVariant": {
+            "type": "array",
+            "items": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "hook": {"type": "string",
+                                 "description": "the scroll-stopping "
+                                                "opening line"},
+                        "content": {"type": "string",
+                                    "description": "2-4 body sentences: "
+                                                   "the promise, proof, "
+                                                   "and offer"},
+                        "cta": {"type": "string",
+                                "description": "the closing call to "
+                                               "action line"},
+                    },
+                    "required": ["hook", "content", "cta"],
+                },
+            },
+            "description": ("for EVERY ad image (one entry per variant, "
+                            "same order; a single entry when no variants): "
+                            "exactly 3 POST COPY variants to publish WITH "
+                            "the ad — the primary text above the creative, "
+                            "each with a clear hook, content, and cta. "
+                            "Improved variants derived from the winning "
+                            "ad's ORIGINAL copy (same persuasion mechanics, "
+                            "adapted to the user's offer) — NOT the short "
+                            "headline rendered inside the image.")},
         "copyTakesPerVariant": {
             "type": "array",
             "items": {"type": "array", "items": {"type": "string"}},
@@ -331,7 +361,11 @@ def build_ad_prompt(brief: str, ad_context: str = "",
         "faithful (face/product unchanged), adopt the reference's layout "
         "and styling, and render the ad copy text EXACTLY as given.\n"
         "For every ad image also fill copyTakesPerVariant with exactly 3 "
-        "copy takes (rendered line first, two alternates).\n\n"
+        "copy takes (rendered line first, two alternates) AND "
+        "postCopyPerVariant with exactly 3 post-copy variants (the "
+        "primary text published WITH the ad), each a {hook, content, cta} "
+        "object derived from the winning ad's original copy — not the "
+        "in-image text.\n\n"
         f"USER'S BRIEF (product/offer/audience): {brief.strip()[:2000]}"
         + ad_note + identity_note + variant_note + marketing_context())
     return dict(_complete(

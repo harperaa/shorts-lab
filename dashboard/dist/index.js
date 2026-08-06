@@ -414,6 +414,8 @@
     var open = openSt[0], setOpen = openSt[1];
     var contentSt = useState({});
     var contents = contentSt[0], setContents = contentSt[1];
+    var postSelSt = useState({});      // creationId -> active post-copy tab
+    var postSel = postSelSt[0], setPostSel = postSelSt[1];
 
     useEffect(function () {
       if (props.draftBrief) setBrief(props.draftBrief);
@@ -1308,6 +1310,8 @@
     var open = openSt[0], setOpen = openSt[1];
     var contentSt = useState({});
     var contents = contentSt[0], setContents = contentSt[1];
+    var postSelSt = useState({});      // creationId -> active post-copy tab
+    var postSel = postSelSt[0], setPostSel = postSelSt[1];
 
     // survive refresh / tab switches — the Clear button resets this
     useEffect(function () {
@@ -1640,28 +1644,92 @@
                     h("img", { className: "sl-result-img",
                         style: { maxWidth: 380, flex: "0 1 380px" },
                         src: c.resultUrl, alt: c.title }),
-                    (c.copyTakes || []).length
-                      ? h("div", { style: { flex: "1 1 240px",
-                            minWidth: 220 } },
-                          h("div", { style: { fontWeight: 800,
-                              fontSize: 13, marginBottom: 6 } },
-                            "Ad copy takes"),
-                          c.copyTakes.map(function (t, j) {
-                            return h("div", { key: j,
-                                className: "sl-copytake" },
+                    (c.postCopy || []).length
+                      ? (function () {
+                          var sel = Math.min(postSel[c.id] || 0,
+                                             c.postCopy.length - 1);
+                          var p = c.postCopy[sel] || {};
+                          var full = [p.hook, p.content, p.cta]
+                            .filter(Boolean).join("\n\n");
+                          return h("div", { style: { flex: "1 1 260px",
+                              minWidth: 230 } },
+                            h("div", { style: { fontWeight: 800,
+                                fontSize: 13, marginBottom: 6 } },
+                              "Post copy",
                               h("span", { className: "sl-note",
-                                  style: { flexShrink: 0 } }, (j + 1) + "."),
-                              h("span", { style: { flex: 1 } }, t),
+                                  style: { fontWeight: 400, marginLeft: 6 } },
+                                "runs with the ad")),
+                            h("div", { style: { display: "flex", gap: 6,
+                                marginBottom: 8 } },
+                              c.postCopy.map(function (_, j) {
+                                var on = j === sel;
+                                return h("button", { key: j,
+                                    className: "sl-tag",
+                                    style: on
+                                      ? { color: "var(--color-primary, #14b8a6)",
+                                          borderColor: "color-mix(in srgb, var(--color-primary, #14b8a6) 60%, transparent)",
+                                          cursor: "pointer" }
+                                      : { cursor: "pointer" },
+                                    onClick: function () {
+                                      var next = {};
+                                      Object.keys(postSel).forEach(
+                                        function (k) { next[k] = postSel[k]; });
+                                      next[c.id] = j;
+                                      setPostSel(next);
+                                    } }, "Variant " + (j + 1));
+                              }),
                               h("button", { className: "sl-btn",
-                                  style: { fontSize: 11, padding: "2px 8px" },
-                                  title: "Copy this take",
+                                  style: { fontSize: 11, padding: "2px 8px",
+                                           marginLeft: "auto" },
+                                  title: "Copy this variant (hook + content + CTA)",
                                   onClick: function () {
                                     try {
-                                      navigator.clipboard.writeText(t);
+                                      navigator.clipboard.writeText(full);
                                     } catch (e2) {}
-                                  } }, "⧉"));
-                          }))
-                      : null)
+                                  } }, "⧉ Copy")),
+                            p.hook
+                              ? h("div", { className: "sl-copytake" },
+                                  h("span", { className: "sl-note",
+                                      style: { flexShrink: 0 } }, "Hook"),
+                                  h("span", { style: { flex: 1 } }, p.hook))
+                              : null,
+                            p.content
+                              ? h("div", { className: "sl-copytake" },
+                                  h("span", { className: "sl-note",
+                                      style: { flexShrink: 0 } }, "Content"),
+                                  h("span", { style: { flex: 1,
+                                      whiteSpace: "pre-wrap" } }, p.content))
+                              : null,
+                            p.cta
+                              ? h("div", { className: "sl-copytake" },
+                                  h("span", { className: "sl-note",
+                                      style: { flexShrink: 0 } }, "CTA"),
+                                  h("span", { style: { flex: 1 } }, p.cta))
+                              : null);
+                        })()
+                      : (c.copyTakes || []).length
+                        ? h("div", { style: { flex: "1 1 240px",
+                              minWidth: 220 } },
+                            h("div", { style: { fontWeight: 800,
+                                fontSize: 13, marginBottom: 6 } },
+                              "Ad copy takes"),
+                            c.copyTakes.map(function (t, j) {
+                              return h("div", { key: j,
+                                  className: "sl-copytake" },
+                                h("span", { className: "sl-note",
+                                    style: { flexShrink: 0 } }, (j + 1) + "."),
+                                h("span", { style: { flex: 1 } }, t),
+                                h("button", { className: "sl-btn",
+                                    style: { fontSize: 11,
+                                             padding: "2px 8px" },
+                                    title: "Copy this take",
+                                    onClick: function () {
+                                      try {
+                                        navigator.clipboard.writeText(t);
+                                      } catch (e2) {}
+                                    } }, "⧉"));
+                            }))
+                        : null)
                 : null,
               c.status !== "generating"
                 ? h("div", { className: "sl-creation-head",

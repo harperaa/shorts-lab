@@ -115,6 +115,7 @@ def _public_state() -> dict:
             "createdAt": c.get("created_at"),
             "pattern": (c.get("source") or {}).get("pattern", ""),
             "copyTakes": (c.get("source") or {}).get("copyTakes", []),
+            "postCopy": (c.get("source") or {}).get("postCopy", []),
         })
     return {
         "channels": store.list_channels(),
@@ -473,6 +474,7 @@ def adlab_generate(body: AdLabBody):
         raise HTTPException(status_code=502, detail=str(exc)[:300])
 
     take_sets = plan.get("copyTakesPerVariant") or []
+    post_sets = plan.get("postCopyPerVariant") or []
     if has_portrait:
         # belt and braces on top of the plan-level mandate — the clause
         # rides every prompt so retries keep it too
@@ -492,6 +494,17 @@ def adlab_generate(body: AdLabBody):
         takes = [str(t)[:300] for t in raw_takes if str(t).strip()][:3]
         if this_copy and this_copy not in takes:
             takes = [this_copy[:300]] + takes[:2]
+        raw_posts = (post_sets[i] if i < len(post_sets) else None) or []
+        posts = []
+        for t in raw_posts[:3]:
+            if isinstance(t, dict):
+                p = {"hook": str(t.get("hook") or "")[:300],
+                     "content": str(t.get("content") or "")[:900],
+                     "cta": str(t.get("cta") or "")[:200]}
+                if p["hook"] or p["content"]:
+                    posts.append(p)
+            elif str(t).strip():          # planner fell back to plain text
+                posts.append({"hook": "", "content": str(t)[:900], "cta": ""})
         task_id = None
         if backend == "kie":
             try:
@@ -503,15 +516,22 @@ def adlab_generate(body: AdLabBody):
                 continue
         takes_md = "\n".join(
             f"{j + 1}. {t}" for j, t in enumerate(takes)) or this_copy
+        posts_md = "\n\n".join(
+            f"**Variant {j + 1}:**\n- Hook: {t['hook']}\n"
+            f"- Content: {t['content']}\n- CTA: {t['cta']}"
+            for j, t in enumerate(posts))
         cid = store.create_creation(
             "image-ad", title, body.brief,
-            f"# {title}\n\n**Ad copy takes:**\n\n{takes_md}\n\n"
+            f"# {title}\n\n**Post copy (runs with the ad):**\n\n"
+            f"{posts_md or '(none)'}\n\n"
+            f"**In-image copy takes:**\n\n{takes_md}\n\n"
             f"**Notes:** {plan.get('notes')}\n\n## Generation prompt\n\n"
             f"{prompt}",
             status="generating",
             source={"adContext": (body.adContext or "")[:500],
                     "prompt": prompt[:4000], "adCopy": this_copy[:500],
                     "copyTakes": takes,
+                    "postCopy": posts,
                     "backend": backend,
                     "sourceUrl": ("" if backend == "hermes"
                                   else (source_url or "")),
