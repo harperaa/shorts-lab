@@ -167,8 +167,10 @@ def host_asset(asset_id: str) -> str:
     0x0.st shut off uploads) and return the public URL KIE can fetch.
 
     Ported from the kit's scripts/imgbb-upload.sh: sha256 content cache,
-    optional IMGBB_EXPIRATION auto-delete, and a 900s safety margin so a
-    cached URL never dies while KIE's queue is still fetching it."""
+    auto-delete after 30 minutes BY DEFAULT (override with IMGBB_EXPIRATION,
+    60-15552000 seconds) — a mentee's portrait should not live forever on a
+    public host — and a 900s safety margin so a cached URL never dies while
+    KIE's queue is still fetching it."""
     import hashlib
     import time as _time
 
@@ -215,9 +217,10 @@ def host_asset(asset_id: str) -> str:
             f"Content-Type: {ctype}\r\n\r\n").encode() + payload + \
         f"\r\n--{boundary}--\r\n".encode()
     url = f"https://api.imgbb.com/1/upload?key={key}"
-    expiration = (os.environ.get("IMGBB_EXPIRATION") or "").strip()
-    if expiration:
-        url += f"&expiration={expiration}"
+    # short-lived by default: 30 minutes covers KIE's queue + generation
+    # (plus a redo or two via the sha256 cache) and then the image is gone
+    expiration = (os.environ.get("IMGBB_EXPIRATION") or "").strip() or "1800"
+    url += f"&expiration={expiration}"
     req = urllib.request.Request(
         url, data=body,
         headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
@@ -232,9 +235,8 @@ def host_asset(asset_id: str) -> str:
         err = (data.get("error") or {}).get("message") or str(data)[:200]
         raise RuntimeError(f"imgBB upload failed: {err}")
     hosted = data["data"]["url"]
-    entry = {"url": hosted, "at": now}
-    if expiration:
-        entry["expiresAt"] = now + int(expiration)
+    entry = {"url": hosted, "at": now,
+             "expiresAt": now + int(expiration)}
     cache[sha] = entry
     store.kv_set("hostedAssets", cache)
     return hosted
