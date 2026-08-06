@@ -29,26 +29,77 @@ except ImportError:  # loaded outside package context
 logger = logging.getLogger(__name__)
 
 
+def _probe_unconfigured_provider():
+    """Find an image provider whose credentials the instance already
+    holds, even when image_gen.provider is unset.
+
+    Hermes core requires an explicit config opt-in before its own tool
+    uses a paid backend; for Ads Lab the product rule is the opposite —
+    a loaded image-capable key (grok OAuth, OPENAI_API_KEY, ...) IS the
+    signal to prefer that model, and the on-page generator toggle is the
+    user's control. Returns the first available non-FAL provider."""
+    try:
+        from agent.image_gen_registry import list_providers
+        from hermes_cli.plugins import _ensure_plugins_discovered
+
+        _ensure_plugins_discovered()
+        for p in list_providers():
+            try:
+                if p.name != "fal" and p.is_available():
+                    return p
+            except Exception:  # noqa: BLE001
+                continue
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
 def hermes_status() -> dict:
     """Is the instance's own image model usable, and which one is it?
 
-    Mirrors hermes' own resolution: availability covers both the FAL
-    path AND an explicitly configured plugin provider (image_gen.provider
-    in config.yaml — set via `hermes tools` → Image Generation), so a
-    grok-only or gpt-image-only instance reports its model here.
+    Resolution: hermes' own config-driven answer first (image_gen.provider
+    set, or a FAL key / managed gateway); if that says no, probe registered
+    providers for one whose credentials are already loaded — so a grok-4.5
+    instance lights up with Grok Imagine without touching config.yaml.
     """
     try:
         from tools.image_generation_tool import (
             _active_image_capabilities,
             check_image_generation_requirements,
         )
-        caps = _active_image_capabilities()
-        return {
-            "available": bool(check_image_generation_requirements()),
-            "provider": caps.get("provider") or None,
-            "model": caps.get("model") or None,
-            "canEdit": "image" in (caps.get("modalities") or []),
-        }
+        if check_image_generation_requirements():
+            caps = _active_image_capabilities()
+            return {
+                "available": True,
+                "provider": caps.get("provider") or None,
+                "model": caps.get("model") or None,
+                "canEdit": "image" in (caps.get("modalities") or []),
+            }
+        p = _probe_unconfigured_provider()
+        if p is not None:
+            try:
+                pcaps = p.capabilities() or {}
+            except Exception:  # noqa: BLE001
+                pcaps = {}
+            try:
+                model = p.default_model() or None
+            except Exception:  # noqa: BLE001
+                model = None
+            try:
+                for row in p.list_models() or []:
+                    if row.get("id") == model and row.get("display"):
+                        model = row["display"]
+                        break
+            except Exception:  # noqa: BLE001
+                pass
+            return {
+                "available": True,
+                "provider": getattr(p, "display_name", None) or p.name,
+                "model": model,
+                "canEdit": "image" in (pcaps.get("modalities") or []),
+            }
+        return {"available": False, "provider": None, "model": None,
+                "canEdit": False}
     except Exception:  # noqa: BLE001 — hermes internals absent (tests)
         return {"available": False, "provider": None, "model": None,
                 "canEdit": False}
@@ -111,6 +162,26 @@ def hermes_generate(prompt: str, source_url: str | None = None,
         raw = it._maybe_route_managed_krea(
             prompt, aspect_ratio, image_url=kwargs["image_url"],
             reference_image_urls=kwargs["reference_image_urls"])
+    if raw is None and not _fal_ready(it):
+        # no configured provider and no FAL key — use the provider whose
+        # credentials the instance already holds (grok OAuth, OpenAI, ...)
+        p = _probe_unconfigured_provider()
+        if p is not None:
+            pkw = {"prompt": prompt, "aspect_ratio": aspect_ratio}
+            if kwargs["image_url"]:
+                pkw["image_url"] = kwargs["image_url"]
+            if kwargs["reference_image_urls"]:
+                pkw["reference_image_urls"] = kwargs["reference_image_urls"]
+            try:
+                out = p.generate(**pkw)
+            except TypeError:
+                if "image_url" in pkw or "reference_image_urls" in pkw:
+                    raise RuntimeError(
+                        f"{getattr(p, 'display_name', p.name)} does not "
+                        f"support image-to-image editing — switch the "
+                        f"generator to KIE.ai for style cloning")
+                raise
+            raw = json.dumps(out) if isinstance(out, dict) else out
     if raw is None:
         raw = it.image_generate_tool(**kwargs)
     out = json.loads(raw)
@@ -118,6 +189,13 @@ def hermes_generate(prompt: str, source_url: str | None = None,
         raise RuntimeError(str(out.get("error")
                                or "image generation failed")[:300])
     return str(out["image"])
+
+
+def _fal_ready(it) -> bool:
+    try:
+        return bool(it.check_fal_api_key())
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def import_result(image: str) -> tuple:

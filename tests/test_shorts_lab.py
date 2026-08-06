@@ -727,6 +727,9 @@ def test_hermes_generate_parses_tool_json(home, monkeypatch):
     fake_pkg.image_generation_tool = fake_mod
     monkeypatch.setitem(sys.modules, "tools", fake_pkg)
     monkeypatch.setitem(sys.modules, "tools.image_generation_tool", fake_mod)
+    # never let the credential probe reach the real registry from tests
+    monkeypatch.setattr(imagegen, "_probe_unconfigured_provider",
+                        lambda: None)
 
     url = imagegen.hermes_generate("neon ad", source_url="data:image/png;a",
                                    ref_urls=["https://style.png", ""])
@@ -759,6 +762,62 @@ def test_status_reports_configured_plugin_provider(home, monkeypatch):
     st = imagegen.hermes_status()
     assert st == {"available": True, "provider": "xAI",
                   "model": "grok-imagine-image", "canEdit": False}
+
+
+class _FakeGrokProvider:
+    """Registry provider double — the grok-loaded-but-unconfigured case."""
+    name = "xai"
+    display_name = "xAI (Grok)"
+
+    def is_available(self):
+        return True
+
+    def capabilities(self):
+        return {"modalities": ["text", "image"], "max_reference_images": 2}
+
+    def default_model(self):
+        return "grok-imagine-image"
+
+    def list_models(self):
+        return [{"id": "grok-imagine-image", "display": "Grok Imagine Image"}]
+
+    def generate(self, prompt, aspect_ratio="1:1", image_url=None,
+                 reference_image_urls=None):
+        self.last = {"prompt": prompt, "image_url": image_url,
+                     "refs": reference_image_urls}
+        return {"success": True, "image": "/opt/data/cache/images/g.png"}
+
+
+def test_probe_lights_up_grok_without_config(home, monkeypatch):
+    """grok 4.5 loaded + image_gen.provider unset -> Ads Lab still routes
+    to Grok Imagine (the config opt-in is hermes-core policy, not ours)."""
+    import types
+    fake_pkg = types.ModuleType("tools")
+    fake_mod = types.ModuleType("tools.image_generation_tool")
+    fake_mod.check_image_generation_requirements = lambda: False
+    fake_mod._active_image_capabilities = lambda: {}
+    fake_mod._dispatch_to_plugin_provider = lambda *a, **k: None
+    fake_mod.check_fal_api_key = lambda: False
+    fake_mod.image_generate_tool = lambda **k: json.dumps(
+        {"success": False, "error": "no backend"})
+    fake_pkg.image_generation_tool = fake_mod
+    monkeypatch.setitem(sys.modules, "tools", fake_pkg)
+    monkeypatch.setitem(sys.modules, "tools.image_generation_tool", fake_mod)
+
+    prov = _FakeGrokProvider()
+    monkeypatch.setattr(imagegen, "_probe_unconfigured_provider",
+                        lambda: prov)
+
+    st = imagegen.hermes_status()
+    assert st == {"available": True, "provider": "xAI (Grok)",
+                  "model": "Grok Imagine Image", "canEdit": True}
+    assert imagegen.get_backend() == "hermes"
+
+    url = imagegen.hermes_generate("ad please", source_url="data:x",
+                                   ref_urls=["https://s.png"])
+    assert url == "/opt/data/cache/images/g.png"
+    assert prov.last == {"prompt": "ad please", "image_url": "data:x",
+                         "refs": ["https://s.png"]}
 
 
 def test_import_result_serves_local_plugin_output(home, tmp_path):

@@ -1469,9 +1469,12 @@
                   onClick: function () { setAdStyle(""); } }, "✕"))
           : null,
         h("div", { className: "sl-note", style: { marginTop: 8 } },
-          "Reference images are hosted briefly on imgBB (auto-deleted " +
-          "after ~30 minutes) so the generator can fetch them — KIE takes " +
-          "URLs only."),
+          useKie
+            ? "Reference images are hosted briefly on imgBB (auto-deleted " +
+              "after ~30 minutes) so the generator can fetch them — KIE " +
+              "takes URLs only."
+            : "Reference images go straight to the instance's image model " +
+              "— no hosting or extra keys needed."),
         h("div", { style: { display: "flex", gap: 10, alignItems: "center",
                             marginTop: 10, flexWrap: "wrap" } },
           h("button", { className: "sl-btn sl-btn-primary",
