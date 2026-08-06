@@ -474,7 +474,8 @@ def adlab_generate(body: AdLabBody):
         raise HTTPException(status_code=502, detail=str(exc)[:300])
 
     take_sets = plan.get("copyTakesPerVariant") or []
-    post_sets = plan.get("postCopyPerVariant") or []
+    post_flat = [t for t in (plan.get("postCopyVariants") or [])
+                 if isinstance(t, dict) or str(t).strip()]
     if has_portrait:
         # belt and braces on top of the plan-level mandate — the clause
         # rides every prompt so retries keep it too
@@ -494,7 +495,7 @@ def adlab_generate(body: AdLabBody):
         takes = [str(t)[:300] for t in raw_takes if str(t).strip()][:3]
         if this_copy and this_copy not in takes:
             takes = [this_copy[:300]] + takes[:2]
-        raw_posts = (post_sets[i] if i < len(post_sets) else None) or []
+        raw_posts = post_flat[i * 3:(i + 1) * 3] or post_flat[:3]
         posts = []
         for t in raw_posts[:3]:
             if isinstance(t, dict):
