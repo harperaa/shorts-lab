@@ -114,6 +114,7 @@ def _public_state() -> dict:
             "error": c.get("error") or "",
             "createdAt": c.get("created_at"),
             "pattern": (c.get("source") or {}).get("pattern", ""),
+            "copyTakes": (c.get("source") or {}).get("copyTakes", []),
         })
     return {
         "channels": store.list_channels(),
@@ -471,6 +472,7 @@ def adlab_generate(body: AdLabBody):
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc)[:300])
 
+    take_sets = plan.get("copyTakesPerVariant") or []
     if has_portrait:
         # belt and braces on top of the plan-level mandate — the clause
         # rides every prompt so retries keep it too
@@ -486,6 +488,10 @@ def adlab_generate(body: AdLabBody):
             (f" — variant {i + 1}/{n}" if n > 1 else "")
         this_copy = (copies[i] if i < len(copies)
                      else plan.get("adCopy") or "")
+        raw_takes = (take_sets[i] if i < len(take_sets) else None) or []
+        takes = [str(t)[:300] for t in raw_takes if str(t).strip()][:3]
+        if this_copy and this_copy not in takes:
+            takes = [this_copy[:300]] + takes[:2]
         task_id = None
         if backend == "kie":
             try:
@@ -495,14 +501,17 @@ def adlab_generate(body: AdLabBody):
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"variant {i + 1}: {str(exc)[:120]}")
                 continue
+        takes_md = "\n".join(
+            f"{j + 1}. {t}" for j, t in enumerate(takes)) or this_copy
         cid = store.create_creation(
             "image-ad", title, body.brief,
-            f"# {title}\n\n**Ad copy (this take):** {this_copy}\n\n"
+            f"# {title}\n\n**Ad copy takes:**\n\n{takes_md}\n\n"
             f"**Notes:** {plan.get('notes')}\n\n## Generation prompt\n\n"
             f"{prompt}",
             status="generating",
             source={"adContext": (body.adContext or "")[:500],
                     "prompt": prompt[:4000], "adCopy": this_copy[:500],
+                    "copyTakes": takes,
                     "backend": backend,
                     "sourceUrl": ("" if backend == "hermes"
                                   else (source_url or "")),

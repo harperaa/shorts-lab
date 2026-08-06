@@ -265,3 +265,12 @@
 /* ---- monitored-page filter chips ---- */
 .sl-filterbar { display: flex; gap: 6px; align-items: center;
   flex-wrap: wrap; margin-bottom: 12px; }
+
+/* ---- ad-copy takes beside the generated image ---- */
+.sl-copytake {
+  display: flex; gap: 8px; align-items: flex-start;
+  background: var(--color-secondary, #13131f);
+  border: 1px solid var(--color-border, #2b2b44);
+  border-radius: 8px; padding: 8px 10px; margin-bottom: 8px;
+  font-size: 12.5px; line-height: 1.5;
+}

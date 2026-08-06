@@ -266,6 +266,15 @@ _AD_PROMPT_SCHEMA = {
                             "ad's copy — same persuasion mechanics, varied "
                             "hook/angle/CTA — one per variant prompt, in "
                             "the same order")},
+        "copyTakesPerVariant": {
+            "type": "array",
+            "items": {"type": "array", "items": {"type": "string"}},
+            "description": ("for EVERY ad image (one entry per variant, "
+                            "same order; a single entry when no variants): "
+                            "exactly 3 ad-copy takes — the line rendered in "
+                            "the image first, then two strong alternates "
+                            "the user can swap in, all derived from the "
+                            "winning copy's mechanics")},
         "notes": {"type": "string",
                   "description": "one or two sentences: which mechanics of the winning copy were kept, and how each take varies it"},
     },
@@ -320,7 +329,9 @@ def build_ad_prompt(brief: str, ad_context: str = "",
         "follows as the style reference) and the user's offer.\n"
         "The prompt must instruct: keep the source subject's identity "
         "faithful (face/product unchanged), adopt the reference's layout "
-        "and styling, and render the ad copy text EXACTLY as given.\n\n"
+        "and styling, and render the ad copy text EXACTLY as given.\n"
+        "For every ad image also fill copyTakesPerVariant with exactly 3 "
+        "copy takes (rendered line first, two alternates).\n\n"
         f"USER'S BRIEF (product/offer/audience): {brief.strip()[:2000]}"
         + ad_note + identity_note + variant_note + marketing_context())
     return dict(_complete(

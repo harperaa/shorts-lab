@@ -1605,9 +1605,47 @@
                 ? h("div", { style: { color: "#f59e0b", fontSize: 12,
                     padding: "0 4px" } }, "⚠ " + c.error)
                 : null,
-              isOpen && c.resultUrl
-                ? h("img", { className: "sl-result-img", src: c.resultUrl,
-                    alt: c.title })
+              c.resultUrl
+                ? h("div", { style: { display: "flex", gap: 14,
+                      flexWrap: "wrap", alignItems: "flex-start",
+                      marginTop: 10 } },
+                    h("img", { className: "sl-result-img",
+                        style: { maxWidth: 380, flex: "0 1 380px" },
+                        src: c.resultUrl, alt: c.title }),
+                    (c.copyTakes || []).length
+                      ? h("div", { style: { flex: "1 1 240px",
+                            minWidth: 220 } },
+                          h("div", { style: { fontWeight: 800,
+                              fontSize: 13, marginBottom: 6 } },
+                            "Ad copy takes"),
+                          c.copyTakes.map(function (t, j) {
+                            return h("div", { key: j,
+                                className: "sl-copytake" },
+                              h("span", { className: "sl-note",
+                                  style: { flexShrink: 0 } }, (j + 1) + "."),
+                              h("span", { style: { flex: 1 } }, t),
+                              h("button", { className: "sl-btn",
+                                  style: { fontSize: 11, padding: "2px 8px" },
+                                  title: "Copy this take",
+                                  onClick: function () {
+                                    try {
+                                      navigator.clipboard.writeText(t);
+                                    } catch (e2) {}
+                                  } }, "⧉"));
+                          }))
+                      : null)
+                : null,
+              c.status !== "generating"
+                ? h("div", { className: "sl-creation-head",
+                    style: { marginTop: 8, fontSize: 12.5 },
+                    onClick: function () {
+                      setOpen(isOpen ? null : c.id);
+                      if (!isOpen) loadContent(c.id);
+                    } },
+                    h("span", { className: "sl-chev" +
+                        (isOpen ? " sl-chev-open" : "") }, "▸"),
+                    h("span", { className: "sl-note" },
+                      "Details — notes & generation prompt"))
                 : null,
               isOpen
                 ? h("pre", { className: "sl-md" }, contents[c.id] || "Loading…")
