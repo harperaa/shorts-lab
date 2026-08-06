@@ -432,6 +432,8 @@ def test_apify_keyword_search_and_routing(home, monkeypatch):
     url0 = captured["body"]["startUrls"][0]["url"]
     assert "q=Lifestyle%20Founders%20Group" in url0
     assert "keyword_exact_phrase" in url0     # multi-word -> exact phrase
+    assert "active_status=active" in url0     # search covers active ads only
+    assert captured["body"]["activeStatus"] == "active"
     assert results[0]["pageId"] == "77"
     assert results[0]["name"] == "Lifestyle Founders Group"
     assert results[0]["nameMatch"] is True

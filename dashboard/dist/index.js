@@ -740,6 +740,15 @@
     var showConnect = connectSt[0], setShowConnect = connectSt[1];
     var endedSt = useState(false);
     var showEnded = endedSt[0], setShowEnded = endedSt[1];
+    var pageFilterSt = useState({});      // page_id -> true (multi-select)
+    var pageFilter = pageFilterSt[0], setPageFilter = pageFilterSt[1];
+    function togglePageFilter(pid) {
+      setPageFilter(function (prev) {
+        var next = Object.assign({}, prev);
+        if (next[pid]) delete next[pid]; else next[pid] = true;
+        return next;
+      });
+    }
     var moreSt = useState({});        // archive_id -> full text shown
     var moreMap = moreSt[0], setMoreMap = moreSt[1];
     var playSt = useState({});        // archive_id -> video playing
@@ -935,12 +944,44 @@
         "Their active ads — longest running first",
         h("span", { className: "sl-note", style: { fontWeight: 400,
             marginLeft: 8 } },
-          "a long run means it keeps paying — those are the ones to study")),
+          "a long run means it keeps paying — those are the ones to study" +
+          " · low-impression ads sink to the bottom")),
+      (st.adPages || []).length > 1
+        ? h("div", { className: "sl-filterbar" },
+            (st.adPages || []).map(function (p) {
+              var n = (st.ads || []).filter(function (a) {
+                return a.page_id === p.page_id && a.active;
+              }).length;
+              return h("button", { key: p.page_id,
+                  className: "sl-tab" +
+                    (pageFilter[p.page_id] ? " sl-tab-on" : ""),
+                  title: "Show only " + (p.name || p.page_id) +
+                    " (select several to combine)",
+                  onClick: function () { togglePageFilter(p.page_id); } },
+                (p.name || p.page_id) + (n ? " (" + n + ")" : ""));
+            }),
+            Object.keys(pageFilter).length
+              ? h("button", { className: "sl-btn", style: { fontSize: 12 },
+                  onClick: function () { setPageFilter({}); } }, "✕ clear")
+              : null)
+        : null,
       (function () {
         var all = st.ads || [];
+        var anyPageSelected = Object.keys(pageFilter).length > 0;
+        if (anyPageSelected) {
+          all = all.filter(function (a) { return pageFilter[a.page_id]; });
+        }
         var activeAds = all.filter(function (a) { return a.active; });
         var endedAds = all.filter(function (a) { return !a.active; });
         var shown = showEnded ? all : activeAds;
+        // low-impression ads sink to the bottom; longest-running order is
+        // preserved within each group (stable sort on a boolean key)
+        function isLow(a) {
+          var imp = (a.creative || {}).impressions || "";
+          return imp.indexOf("<") !== -1;
+        }
+        shown = shown.filter(function (a) { return !isLow(a); })
+          .concat(shown.filter(isLow));
         if (!all.length) {
           return h("div", { className: "sl-card sl-note" },
             (st.keys.meta || st.keys.apify)

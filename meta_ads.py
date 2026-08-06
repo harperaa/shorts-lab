@@ -128,7 +128,7 @@ def search_pages(term: str, countries: str = "US",
         "ad_reached_countries": countries,
         "ad_delivery_date_min": date_min,
         "ad_delivery_date_max": date_max,
-        "ad_active_status": "ALL",
+        "ad_active_status": "ACTIVE",
         "fields": "page_id,page_name",
         "limit": 100,
     })
@@ -449,12 +449,13 @@ def apify_search_pages(term: str, limit: int = 50) -> list:
     # buried under every page whose ads merely say "creator"
     stype = ("keyword_exact_phrase" if " " in term.strip()
              else "keyword_unordered")
-    search_url = ("https://www.facebook.com/ads/library/?active_status=all"
+    search_url = ("https://www.facebook.com/ads/library/?active_status=active"
                   "&ad_type=all&country=US&q="
                   + urllib.parse.quote(term.strip())
                   + f"&search_type={stype}")
     body = json.dumps({"startUrls": [{"url": search_url}],
-                       "resultsLimit": min(max(limit, 100), 200)}).encode()
+                       "resultsLimit": min(max(limit, 100), 200),
+                       "activeStatus": "active"}).encode()
     url = (f"https://api.apify.com/v2/acts/{APIFY_ACTOR}"
            "/run-sync-get-dataset-items?token="
            + urllib.parse.quote(token) + "&timeout=240")

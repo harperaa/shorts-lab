@@ -261,3 +261,7 @@
 .sl-extlink { color: var(--color-muted-foreground, #9aa0b4);
   display: inline-flex; align-items: center; flex-shrink: 0; }
 .sl-extlink:hover { color: var(--color-primary, #14b8a6); }
+
+/* ---- monitored-page filter chips ---- */
+.sl-filterbar { display: flex; gap: 6px; align-items: center;
+  flex-wrap: wrap; margin-bottom: 12px; }
