@@ -1421,6 +1421,48 @@
                           : props.label + " — click or drop"));
   }
 
+  function AuthImg(props) {
+    // plugin-API image routes 401 on bare <img> in loopback mode (the
+    // session token rides a header, not a cookie) — fetch as a blob with
+    // the token and swap in an object URL; cookie-auth deployments fall
+    // through to the plain src.
+    var srcSt = useState(null);
+    var src = srcSt[0], setSrc = srcSt[1];
+    useEffect(function () {
+      var url = props.src;
+      var tok = null;
+      try { tok = window.__HERMES_SESSION_TOKEN__ || null; } catch (e) {}
+      if (!url || url.indexOf("/api/") !== 0 || !tok) {
+        setSrc(url || null);
+        return undefined;
+      }
+      var dead = false;
+      var obj = null;
+      fetch(url, { headers: { "X-Hermes-Session-Token": tok } })
+        .then(function (r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.blob();
+        })
+        .then(function (b) {
+          obj = URL.createObjectURL(b);
+          if (!dead) setSrc(obj);
+        })
+        .catch(function () { if (!dead) setSrc(url); });
+      return function () {
+        dead = true;
+        if (obj) URL.revokeObjectURL(obj);
+      };
+    }, [props.src]);
+    if (!src) {
+      return h("div", { className: "sl-note",
+        style: props.style }, "…");
+    }
+    var p = {};
+    Object.keys(props).forEach(function (k) { p[k] = props[k]; });
+    p.src = src;
+    return h("img", p);
+  }
+
   function AdvancedStudio(props) {
     var st = props.st;
     var openSt = useState(function () {
@@ -1626,9 +1668,10 @@
                       style: { position: "relative", cursor: "pointer" },
                       title: rf.path,
                       onClick: function () { togglePick(rf.path); } },
-                    h("img", { src: API + "/reference/" + rf.path,
+                    h(AuthImg, { src: API + "/reference/" + rf.path,
                         style: { width: "100%", height: 96,
                           objectFit: "cover", borderRadius: 8,
+                          display: "block",
                           border: on
                             ? "2px solid var(--color-primary, #14b8a6)"
                             : "1px solid var(--color-border, #2b2b44)" } }),
@@ -1665,11 +1708,11 @@
                     h("div", { style: { fontWeight: 800,
                         fontSize: 12.5 } },
                       r.emoji + " " + r.name,
-                      r.media === "video"
-                        ? h("span", { className: "sl-note",
-                            style: { marginLeft: 6, fontSize: 10 } },
-                            "🎬 video · KIE")
-                        : null),
+                      h("span", { className: "sl-note",
+                          style: { marginLeft: 6, fontSize: 10 } },
+                        r.media === "video" ? "🎬 video · KIE"
+                          : r.kind === "pipeline" ? "🧬 pipeline · KIE"
+                          : "🖼 still image")),
                     h("div", { className: "sl-note",
                         style: { fontSize: 11 } }, r.desc));
                 })),
@@ -2551,7 +2594,7 @@
                 ? h("div", { style: { display: "flex", gap: 14,
                       flexWrap: "wrap", alignItems: "flex-start",
                       marginTop: 10 } },
-                    h("img", { className: "sl-result-img",
+                    h(AuthImg, { className: "sl-result-img",
                         style: { maxWidth: 380, flex: "0 1 380px" },
                         src: c.resultUrl, alt: c.title }),
                     (c.postCopy || []).length
