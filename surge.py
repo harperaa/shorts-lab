@@ -168,8 +168,12 @@ h1 { margin: 4px 0 26px; font-size: 26px; }
 .ad { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start;
       background: #16162a; border: 1px solid #2b2b44; border-radius: 14px;
       padding: 20px; margin-bottom: 26px; }
-.ad img { max-width: 440px; width: 100%; border-radius: 10px;
-          flex: 0 1 440px; }
+.imgwrap { flex: 0 1 440px; max-width: 440px; width: 100%; }
+.imgwrap img { width: 100%; border-radius: 10px; display: block; }
+.dl { display: inline-block; margin-top: 10px; border: 1px solid #2b2b44;
+      color: #e8e8f0; border-radius: 8px; padding: 6px 14px;
+      font-size: 12.5px; font-weight: 700; text-decoration: none; }
+.dl:hover { border-color: #14b8a6; color: #14b8a6; }
 .side { flex: 1 1 300px; min-width: 280px; }
 .ad h2 { margin: 0 0 12px; font-size: 17px; }
 .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
@@ -227,6 +231,14 @@ def _esc(t: str) -> str:
     return html.escape(str(t or ""), quote=True)
 
 
+def _safe_filename(title: str, ext: str) -> str:
+    """Ad title -> download filename: '/' becomes '-', every other
+    filesystem-hostile character too, whitespace collapsed."""
+    name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "-", str(title or "ad"))
+    name = re.sub(r"\s+", " ", name).strip(" .-") or "ad"
+    return f"{name[:120]}.{ext}"
+
+
 def _js_str(t: str) -> str:
     return json.dumps(str(t or ""))
 
@@ -274,9 +286,15 @@ def build_page(creations: list, images: dict) -> str:
                 f'⧉ copy</button></div>' for i, t in enumerate(takes))
             takes_html = (f'<div class="takes"><h3>In-image headline takes'
                           f'</h3>{rows}</div>')
+        img_ext = images[cid].rsplit(".", 1)[-1]
+        dl_name = _safe_filename(c["title"], img_ext)
         sections.append(f'''
 <section class="ad">
-  <img src="{images[cid]}" alt="{_esc(c["title"])}">
+  <div class="imgwrap">
+    <img src="{images[cid]}" alt="{_esc(c["title"])}">
+    <a class="dl" href="{images[cid]}" download="{_esc(dl_name)}">
+      ⬇ Download image</a>
+  </div>
   <div class="side">
     <h2>{_esc(c["title"])}</h2>
     <div class="tabs">{"".join(tabs)}</div>

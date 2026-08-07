@@ -918,6 +918,8 @@ def test_surge_page_has_variants_and_copy_buttons(home):
     page = surge.build_page(creations, {7: "ad-7.png"})
     assert 'src="ad-7.png"' in page
     assert page.count("Variant ") == 3
+    assert 'download="Bootcamp hero.png"' in page
+    assert "⬇ Download image" in page
     assert "Body with ✅ bullet" in page
     assert page.count("⧉ copy") >= 5          # hook/content/cta + takes
     assert "Copy whole variant" in page
@@ -1027,3 +1029,13 @@ def test_surge_list_and_validate(home, monkeypatch):
     monkeypatch.setattr(surge.requests, "get",
                         lambda url, auth=None, timeout=None: _FakeResp(401))
     assert surge.validate("bad")["ok"] is False
+
+
+def test_download_filename_is_safe(home):
+    creations = [{"id": 3, "title": "Ad creative — variant 2/3",
+                  "source": {"postCopy": [], "copyTakes": []}}]
+    page = surge.build_page(creations, {3: "ad-3.jpg"})
+    assert 'download="Ad creative — variant 2-3.jpg"' in page
+    assert surge._safe_filename('a/b\\c:d*e?"f"<g>|h', "png") == \
+        "a-b-c-d-e--f--g--h.png"
+    assert surge._safe_filename("", "png") == "ad.png"
