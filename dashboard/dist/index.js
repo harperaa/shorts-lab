@@ -2425,16 +2425,18 @@
                 h("button", { className: "sl-btn",
                     onClick: function () { setPages(null); } }, "Close"))))
         : null,
-      h("div", { style: { fontWeight: 800, margin: "4px 0 10px" } },
-        "Your ad creatives",
-        h("span", { className: "sl-note", style: { fontWeight: 400,
-            marginLeft: 8 } }, adsCreations.length + " creative(s)"),
+      h("div", { style: { fontWeight: 800, margin: "4px 0 12px",
+          display: "flex", alignItems: "center", flexWrap: "wrap",
+          gap: 8, rowGap: 10 } },
+        h("span", null, "Your ad creatives"),
+        h("span", { className: "sl-note", style: { fontWeight: 400 } },
+          adsCreations.length + " creative(s)"),
         (function () {
           var gen = adsCreations.filter(function (c) {
             return c.status === "generating";
           }).length;
           return gen
-            ? h("span", { style: { marginLeft: 10, fontWeight: 700,
+            ? h("span", { style: { fontWeight: 700,
                   fontSize: 12.5,
                   color: "var(--color-primary, #14b8a6)" } },
                 h("span", { className: "sl-spin",
@@ -2442,8 +2444,9 @@
                 gen + " in progress")
             : null;
         })(),
-        h("span", { style: { float: "right", display: "inline-flex",
-            gap: 8, fontWeight: 400 } },
+        h("span", { style: { marginLeft: "auto", display: "inline-flex",
+            gap: 8, rowGap: 8, flexWrap: "wrap", fontWeight: 400,
+            justifyContent: "flex-end" } },
           (function () {
             var ready = adsCreations.filter(function (c) {
               return c.status === "ready";
