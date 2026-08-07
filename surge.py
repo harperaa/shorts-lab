@@ -47,6 +47,37 @@ def is_connected() -> bool:
     return bool(token())
 
 
+def login(email: str, password: str) -> dict:
+    """Mint an account token from email + password — surge's own login
+    call (POST /token, basic auth email:password). A NEW email creates
+    the account on the spot, exactly like `surge login`. The password is
+    used for this one request and never stored or logged."""
+    email = (email or "").strip()
+    if not email or "@" not in email:
+        return {"ok": False, "error": "a valid email is required"}
+    if not (password or ""):
+        return {"ok": False, "error": "a password is required"}
+    try:
+        r = requests.post(f"{BASE_URL}/token", auth=(email, password),
+                          json={"msg": "login from hermes shorts-lab"},
+                          timeout=_TIMEOUT)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"surge unreachable: {exc}"}
+    if r.status_code == 401:
+        return {"ok": False,
+                "error": "wrong password for an existing surge account"}
+    if r.status_code >= 300:
+        return {"ok": False,
+                "error": f"surge login failed (HTTP {r.status_code})"}
+    try:
+        tok = (r.json() or {}).get("token") or ""
+    except ValueError:
+        tok = ""
+    if not tok:
+        return {"ok": False, "error": "surge returned no token"}
+    return {"ok": True, "token": tok}
+
+
 def validate(tok: str) -> dict:
     """Cheapest possible auth check: the account's project list."""
     try:

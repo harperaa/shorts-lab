@@ -761,15 +761,17 @@
 
   function SurgeSteps() {
     return h("ol", { className: "sl-steps" },
-      h("li", null, "Create a free account at ",
+      h("li", null, "surge.sh (",
         extLink("https://surge.sh", "surge.sh"),
-        " (it's the static-hosting service the ad packs publish to)."),
-      h("li", null, "On any machine with node: run ",
-        h("code", null, "npx surge login"), " then ",
-        h("code", null, "npx surge token"),
-        " — it prints your account token."),
-      h("li", null, "Paste the token below. Published pages live at " +
-        "https://<name>.surge.sh — share the link with your editor."));
+        ") is the free static-hosting service your ad packs publish to."),
+      h("li", null, "Enter an email and a password below — a NEW email " +
+        "creates your surge account on the spot; an existing account " +
+        "just signs in. The password is used once to mint your access " +
+        "token and is never stored."),
+      h("li", null, "Published pages live at https://<name>.surge.sh — " +
+        "share the link with your editor."),
+      h("li", null, h("i", null, "Already have a surge token? Leave the " +
+        "email empty and paste the token in the second field.")));
   }
 
   var CONNECT_KINDS = {
@@ -782,7 +784,10 @@
     imgbb: { env: "IMGBB_API_KEY", title: "🔗 Connect imgBB (image hosting)",
              steps: ImgbbSteps, ph: "Paste your imgBB API key" },
     surge: { env: "SURGE_TOKEN", title: "🔗 Connect surge.sh (ad-pack pages)",
-             steps: SurgeSteps, ph: "Paste your surge token" },
+             steps: SurgeSteps,
+             ph: "Password (new account or existing) — or a surge token",
+             loginPh: "Email — new address creates the account",
+             loginOptional: true },
   };
 
   function ConnectModal(props) {
@@ -837,7 +842,7 @@
             "Cancel"),
           h("button", { className: "sl-btn sl-btn-primary",
               disabled: busy || !keyVal.trim() ||
-                (spec.loginPh && !loginVal.trim()),
+                (spec.loginPh && !spec.loginOptional && !loginVal.trim()),
               onClick: save },
             busy ? "Verifying…" : "Verify & save"))));
   }
@@ -1770,6 +1775,25 @@
         })(),
         h("span", { style: { float: "right", display: "inline-flex",
             gap: 8, fontWeight: 400 } },
+          (function () {
+            var ready = adsCreations.filter(function (c) {
+              return c.status === "ready";
+            });
+            if (!ready.length) return null;
+            var allOn = ready.every(function (c) { return sel[c.id]; });
+            return h("button", { className: "sl-btn",
+                style: { fontSize: 12 },
+                title: allOn ? "Untick every ad"
+                             : "Tick every ready ad for the pack",
+                onClick: function () {
+                  var next = {};
+                  if (!allOn) {
+                    ready.forEach(function (c) { next[c.id] = true; });
+                  }
+                  setSel(next);
+                } },
+              allOn ? "☐ Select none" : "☑ Select all");
+          })(),
           h("button", { className: "sl-btn", style: { fontSize: 12 },
               disabled: pubBusy,
               title: st.keys.surge

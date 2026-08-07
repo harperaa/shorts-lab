@@ -984,6 +984,33 @@ def test_surge_publish_requires_info_event(home, monkeypatch):
         surge.publish([cid])
 
 
+def test_surge_login_mints_token(home, monkeypatch):
+    """email+password -> POST /token (surge's own login; new emails create
+    the account). Only the minted token survives — never the password."""
+    sent = {}
+
+    def fake_post(url, auth=None, json=None, timeout=None):
+        sent["url"] = url
+        sent["auth"] = auth
+        sent["body"] = json
+        return _FakeResp(201, payload={"token": "minted-tok"})
+
+    monkeypatch.setattr(surge.requests, "post", fake_post)
+    out = surge.login("mentee@example.com", "hunter2")
+    assert out == {"ok": True, "token": "minted-tok"}
+    assert sent["url"].endswith("/token")
+    assert sent["auth"] == ("mentee@example.com", "hunter2")
+    assert "msg" in sent["body"]
+
+    monkeypatch.setattr(surge.requests, "post",
+                        lambda url, auth=None, json=None, timeout=None:
+                        _FakeResp(401))
+    out = surge.login("mentee@example.com", "wrong")
+    assert out["ok"] is False and "wrong password" in out["error"]
+    assert surge.login("", "x")["ok"] is False
+    assert surge.login("a@b.c", "")["ok"] is False
+
+
 def test_surge_list_and_validate(home, monkeypatch):
     monkeypatch.setenv("SURGE_TOKEN", "tok")
 
