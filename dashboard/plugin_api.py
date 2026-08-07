@@ -1053,6 +1053,46 @@ def creations_check(body: CreationBody):
             src = dict(c.get("source") or {})
             retries = int(src.get("retries") or 0)
             verdict = None
+            if c.get("kind") == "video-ad":
+                # video QA: sampled frames reviewed for duplicated props
+                # (phantom second mics), broken anatomy, junk captions —
+                # BEFORE the user sees the clip. Fails open if ffmpeg or
+                # the checker can't run.
+                try:
+                    frames = recipes.extract_video_frames(tick["url"])
+                    if frames:
+                        verdict = analysis.video_qa(
+                            frames, src.get("prompt") or "")
+                except Exception:  # noqa: BLE001
+                    verdict = None
+                if verdict is not None and not verdict["ok"] \
+                        and src.get("prompt") and src.get("model") \
+                        and retries < 2:
+                    try:
+                        sub = kie.submit_video(
+                            src["model"], src["prompt"],
+                            aspect_ratio=src.get("aspectRatio") or "9:16",
+                            duration=int(src.get("duration") or 0) or None,
+                            image_urls=src.get("refUrls") or [],
+                            veo_mode=src.get("veoMode") or "")
+                        src["retries"] = retries + 1
+                        src["family"] = sub["family"]
+                        src["lastIssues"] = verdict["issues"]
+                        store.update_creation(
+                            body.id, task_id=sub["taskId"], source=src,
+                            error="retry {}/2 — video QA: {}".format(
+                                retries + 1,
+                                "; ".join(verdict["issues"])[:150]))
+                        return {"ok": True, "state": _public_state()}
+                    except Exception:  # noqa: BLE001
+                        pass
+                warn = ""
+                if verdict is not None and not verdict["ok"]:
+                    warn = ("video QA issues persisted after retries: "
+                            + "; ".join(verdict["issues"])[:180])
+                store.update_creation(body.id, status="ready",
+                                      result_url=tick["url"], error=warn)
+                return {"ok": True, "state": _public_state()}
             try:
                 # proof the rendered text BEFORE the user sees the card —
                 # fail open if the checker itself can't run

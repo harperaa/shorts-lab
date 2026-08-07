@@ -502,3 +502,69 @@ def spellcheck_image(image_url: str, expected_copy: str = "",
             "personOk": person_ok,
             "readText": str(parsed.get("readText") or "")[:300],
             "issues": [str(i)[:120] for i in (parsed.get("issues") or [])][:5]}
+
+
+# ---------------------------------------------------------------------------
+# Video QA — review generated clips BEFORE the user sees them (prop
+# duplication like phantom second microphones, broken anatomy, wrong
+# person, unwanted burned-in text)
+# ---------------------------------------------------------------------------
+
+_VIDEO_QA_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "propsOk": {"type": "boolean",
+                    "description": "true ONLY if the shot contains exactly "
+                                   "the described props with NO duplicates "
+                                   "— e.g. one microphone means ONE, a "
+                                   "second mic anywhere fails"},
+        "personOk": {"type": "boolean",
+                     "description": "true ONLY if there is one consistent, "
+                                    "anatomically sound person (hands, "
+                                    "fingers, face intact) matching the "
+                                    "description across the frames"},
+        "cleanOk": {"type": "boolean",
+                    "description": "true ONLY if there is no unwanted "
+                                   "burned-in text/captions and no obvious "
+                                   "rendering artifacts"},
+        "issues": {"type": "array", "items": {"type": "string"},
+                   "description": "each concrete problem found"},
+    },
+    "required": ["propsOk", "personOk", "cleanOk", "issues"],
+}
+
+
+def video_qa(frame_urls: list, expected: str) -> dict:
+    """Vision QA over sampled frames of a generated video. Raises only on
+    LLM transport errors — callers decide whether to fail open."""
+    import re
+    inputs = [{"type": "image", "url": u} for u in frame_urls[:4]]
+    res = _llm().complete_structured(
+        instructions=(
+            "You are quality-checking frames sampled from an AI-generated "
+            "video ad before the user sees it. THE SHOT SHOULD CONTAIN: "
+            + (expected or "a single person presenting a product")[:1200]
+            + " Fail propsOk on ANY duplicated prop (two microphones, two "
+              "identical tumblers, extra phones), fail personOk on broken "
+              "anatomy or an inconsistent person between frames, fail "
+              "cleanOk on unwanted burned-in captions or glitch artifacts."),
+        input=inputs,
+        json_schema=_VIDEO_QA_SCHEMA,
+        schema_name="video_qa",
+        temperature=0.0,
+        max_tokens=500,
+        timeout=120,
+        purpose="shorts-lab-video-qa",
+    )
+    parsed = getattr(res, "parsed", None)
+    if parsed is None:
+        raw = getattr(res, "text", "") or ""
+        m = re.search(r"\{.*\}", raw, re.DOTALL)
+        parsed = json.loads(m.group(0)) if m else None
+    if not isinstance(parsed, dict):
+        raise RuntimeError("video QA returned nothing usable")
+    ok = bool(parsed.get("propsOk")) and bool(parsed.get("personOk")) \
+        and bool(parsed.get("cleanOk"))
+    return {"ok": ok,
+            "issues": [str(i)[:140] for i in (parsed.get("issues")
+                                              or [])][:5]}

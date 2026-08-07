@@ -272,6 +272,9 @@ def start_video(recipe_id: str, brief: str, model: str = "",
             status="generating",
             source={"recipe": recipe_id, "model": model,
                     "family": sub["family"], "prompt": prompt[:4000],
+                    "refUrls": (ref_urls or [])[:4],
+                    "aspectRatio": aspect_ratio, "duration": duration or 0,
+                    "veoMode": veo_mode or "",
                     "retries": 0})
         store.update_creation(cid, task_id=sub["taskId"])
         cids.append(cid)
@@ -452,8 +455,40 @@ def animate_storyboard(creation_id: int,
             status="generating",
             source={"recipe": src.get("recipe"), "model": model,
                     "family": sub["family"], "parentId": c["id"],
+                    "prompt": motion[:4000], "refUrls": [step["url"]],
+                    "aspectRatio": "16:9", "duration": 5,
                     "retries": 0})
         store.update_creation(vcid, task_id=sub["taskId"])
         made += 1
     _ = guide  # guide text reserved for future per-beat motion planning
     return made
+
+
+
+def extract_video_frames(video_url: str, count: int = 3) -> list:
+    """Sample frames from a (remote) video via ffmpeg -> data URIs for
+    vision QA. Returns [] when ffmpeg is unavailable (QA skips)."""
+    import base64
+    import shutil
+    import subprocess
+    import tempfile
+
+    if not shutil.which("ffmpeg"):
+        return []
+    out = []
+    with tempfile.TemporaryDirectory() as td:
+        for i, pos in enumerate(["1", "4", "8"][:count]):
+            dest = f"{td}/f{i}.jpg"
+            try:
+                subprocess.run(
+                    ["ffmpeg", "-y", "-v", "error",
+                     "-user_agent", "Mozilla/5.0 (shorts-lab)",
+                     "-ss", pos, "-i", video_url, "-frames:v", "1",
+                     "-q:v", "3", dest],
+                    check=True, timeout=120, capture_output=True)
+                with open(dest, "rb") as fh:
+                    out.append("data:image/jpeg;base64,"
+                               + base64.b64encode(fh.read()).decode())
+            except Exception:  # noqa: BLE001 — later timestamps may
+                continue      # overshoot short clips
+    return out

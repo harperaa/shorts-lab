@@ -497,3 +497,52 @@ def test_kling_input_quirks(home, monkeypatch):
     inp = sent["body"]["input"]
     assert inp["image_urls"] == ["https://h/a.jpg"]   # capped at 1
     assert inp["duration"] == "10"
+
+
+# ---------------------------------------------------------------------------
+# video QA gate
+# ---------------------------------------------------------------------------
+
+def test_video_qa_verdict_parsing(home, monkeypatch):
+    class R:
+        parsed = {"propsOk": False, "personOk": True, "cleanOk": True,
+                  "issues": ["two microphones visible on the tumbler"]}
+
+    class L:
+        def complete_structured(self, **kw):
+            L.last = kw
+            return R()
+
+    monkeypatch.setattr(analysis, "_llm", lambda: L())
+    v = analysis.video_qa(["data:image/jpeg;base64,AAA",
+                           "data:image/jpeg;base64,BBB"],
+                          "one clip-on mic on a pink tumbler")
+    assert v["ok"] is False
+    assert "two microphones" in v["issues"][0]
+    assert [i["type"] for i in L.last["input"]] == ["image", "image"]
+    assert "duplicated prop" in L.last["instructions"]
+
+    R.parsed = {"propsOk": True, "personOk": True, "cleanOk": True,
+                "issues": []}
+    assert analysis.video_qa(["data:x"], "")["ok"] is True
+
+
+def test_video_source_carries_retry_metadata(home, monkeypatch):
+    monkeypatch.setenv("KIE_API_KEY", "k")
+    monkeypatch.setattr(analysis, "_llm", lambda: _fake_llm(
+        {"title": "T", "prompts": ["p"], "notes": ""}))
+    monkeypatch.setattr(kie, "submit_video",
+                        lambda *a, **k: {"taskId": "t", "family": "jobs"})
+    cids = recipes.start_video("seedance-ugc", "brief",
+                               aspect_ratio="9:16", duration=10,
+                               ref_urls=["https://h/x.jpg"])
+    src = store.get_creation(cids[0])["source"]
+    assert src["refUrls"] == ["https://h/x.jpg"]
+    assert src["aspectRatio"] == "9:16" and src["duration"] == 10
+    assert src["model"] == "bytedance/seedance-2"
+
+
+def test_extract_frames_skips_without_ffmpeg(home, monkeypatch):
+    import shutil
+    monkeypatch.setattr(shutil, "which", lambda n: None)
+    assert recipes.extract_video_frames("https://x/v.mp4") == []
