@@ -1482,6 +1482,8 @@
     var picks = pickSt[0], setPicks = pickSt[1];
     var recSt = useState("ugc-selfie");
     var recId = recSt[0], setRecId = recSt[1];
+    var tplSt = useState("");
+    var tpl = tplSt[0], setTpl = tplSt[1];
     var briefSt = useState("");
     var brief = briefSt[0], setBrief = briefSt[1];
     var extraSt = useState("");
@@ -1541,7 +1543,8 @@
       }
       setBusy(true); setErr(null); setOkMsg(null);
       postJSON("/advanced/recipe/start", {
-        recipe: recId, brief: brief, extra: extra, model: model,
+        recipe: recId, template: tpl, brief: brief, extra: extra,
+        model: model,
         aspectRatio: ar, duration: Number(dur) || 0, variants: nVar,
         refPaths: picks,
       })
@@ -1727,6 +1730,20 @@
                       "grok") +
                     ") does images, not video. Connect KIE to run this " +
                     "recipe.")
+                : null,
+              rec && rec.id === "image-ad-template"
+                ? h("select", { className: "sl-input",
+                    style: { marginBottom: 8 }, value: tpl,
+                    onChange: function (e) { setTpl(e.target.value); } },
+                    [h("option", { key: "", value: "" },
+                      "— pick one of the " +
+                      ((adv.imageAdTemplates || []).length || 37) +
+                      " templates —")]
+                      .concat((adv.imageAdTemplates || []).map(
+                        function (t) {
+                          return h("option", { key: t.id, value: t.id },
+                            t.id + " — " + t.name);
+                        })))
                 : null,
               h("textarea", { className: "sl-input", rows: 3,
                   placeholder: rec && rec.id === "character-sheet"

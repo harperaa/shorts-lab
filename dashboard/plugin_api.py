@@ -723,8 +723,11 @@ def adlab_iterate(body: IterateBody):
 @router.get("/advanced/state")
 def advanced_state():
     hs = imagegen.hermes_status()
+    from importlib import import_module as _imp
+    kiedocs = _imp(f"{_PKG}.kieref.loader")
     return {
         "recipes": recipes.catalog(),
+        "imageAdTemplates": kiedocs.image_ad_templates(),
         "models": {k: {kk: vv for kk, vv in v.items()}
                    for k, v in kie.MODELS.items()},
         "references": references.tree(),
@@ -808,6 +811,7 @@ def _host_reference(rel: str) -> str:
 
 class RecipeStartBody(BaseModel):
     recipe: str = ""
+    template: str = ""       # image-ad-template: T1..T37
     brief: str = ""
     model: str = ""
     aspectRatio: str = "9:16"
@@ -885,8 +889,19 @@ def advanced_recipe_start(body: RecipeStartBody):
         # plain image recipes: build prompts from the guide, then ride the
         # EXISTING backend selection (instance model or KIE)
         n = max(1, min(10, int(body.variants or 1)))
+        guide_override = ""
+        if r["id"] == "image-ad-template" and (body.template or "").strip():
+            from importlib import import_module as _imp
+            kiedocs = _imp(f"{_PKG}.kieref.loader")
+            guide_override = kiedocs.image_ad_template_text(
+                body.template.strip())
+            if not guide_override:
+                raise HTTPException(status_code=400,
+                                    detail=f"unknown template "
+                                           f"{body.template}")
         plan = recipes.build_prompts(r["id"], body.brief, n=n,
-                                     extra=body.extra or "")
+                                     extra=body.extra or "",
+                                     guide_override=guide_override)
         cids = []
         hermes_jobs = []
         for i, prompt in enumerate(plan["prompts"][:n]):
@@ -1061,8 +1076,10 @@ def creations_check(body: CreationBody):
                 try:
                     frames = recipes.extract_video_frames(tick["url"])
                     if frames:
+                        ref = (src.get("refUrls") or [""])[0]
                         verdict = analysis.video_qa(
-                            frames, src.get("prompt") or "")
+                            frames, src.get("prompt") or "",
+                            reference_frame=ref)
                 except Exception:  # noqa: BLE001
                     verdict = None
                 if verdict is not None and not verdict["ok"] \

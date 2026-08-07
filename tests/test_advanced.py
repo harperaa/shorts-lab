@@ -546,3 +546,21 @@ def test_extract_frames_skips_without_ffmpeg(home, monkeypatch):
     import shutil
     monkeypatch.setattr(shutil, "which", lambda n: None)
     assert recipes.extract_video_frames("https://x/v.mp4") == []
+
+
+def test_image_ad_template_library_parses():
+    ts = kiedocs.image_ad_templates()
+    assert len(ts) == 37
+    assert ts[0] == {"id": "T1", "name": "Apple Notes listicle aesthetic"}
+    txt = kiedocs.image_ad_template_text("T5")
+    assert "T5" in txt and "safety" in txt.lower()
+    assert kiedocs.image_ad_template_text("T99") == ""
+    assert kiedocs.image_ad_template_text("../evil") == ""
+
+
+def test_build_prompts_uses_template_override(home, monkeypatch):
+    monkeypatch.setattr(analysis, "_llm", lambda: _fake_llm(
+        {"title": "Ad", "prompts": ["p"], "notes": ""}))
+    recipes.build_prompts("image-ad-template", "my offer",
+                          guide_override="THE ONLY TEMPLATE TEXT T7")
+    assert "THE ONLY TEMPLATE TEXT T7" in _fake_llm.last["input"][0]["text"]

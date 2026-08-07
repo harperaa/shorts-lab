@@ -70,3 +70,34 @@ def guide_text(recipe: str, max_chars: int = 24000) -> str:
 
 def available() -> list:
     return sorted(GUIDES)
+
+
+def image_ad_templates() -> list:
+    """The 37-template static image-ad library, parsed from the bundled
+    prompt-library.md (`## T<N> — <name>` sections)."""
+    import re
+    p = ROOT / ("shared/skills/image-ad-prompting/prompting/"
+                "prompt-library.md")
+    out = []
+    if p.exists():
+        for m in re.finditer(r"^## (T\d+) — (.+)$", p.read_text(),
+                             re.MULTILINE):
+            out.append({"id": m.group(1), "name": m.group(2).strip()})
+    return out
+
+
+def image_ad_template_text(template_id: str, max_chars: int = 9000) -> str:
+    """One template's full section text plus the shared safety suffixes
+    and entry-format notes."""
+    import re
+    p = ROOT / ("shared/skills/image-ad-prompting/prompting/"
+                "prompt-library.md")
+    section = ""
+    if p.exists() and re.fullmatch(r"T\d+", template_id or ""):
+        txt = p.read_text()
+        m = re.search(rf"^## {template_id} — .*?(?=^## |\Z)", txt,
+                      re.MULTILINE | re.DOTALL)
+        if m:
+            section = m.group(0)[:max_chars]
+    extras = guide_text("image-ad-overview", max_chars=6000)
+    return (section + "\n\n" + extras) if section else ""

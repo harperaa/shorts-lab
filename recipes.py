@@ -156,10 +156,11 @@ _PROMPT_SCHEMA = {
 
 
 def build_prompts(recipe_id: str, brief: str, n: int = 1,
-                  extra: str = "") -> dict:
+                  extra: str = "", guide_override: str = "") -> dict:
     """Compose generation prompt(s) for a recipe, grounded in the bundled
-    guide text for that recipe."""
-    guide = kiedocs.guide_text(recipe_id)
+    guide text for that recipe (or an explicit guide slice, e.g. one
+    template of the 37-template image-ad library)."""
+    guide = guide_override or kiedocs.guide_text(recipe_id)
     r = recipe(recipe_id)
     n = max(1, min(10, int(n or 1)))
     payload = (

@@ -527,18 +527,43 @@ _VIDEO_QA_SCHEMA = {
                     "description": "true ONLY if there is no unwanted "
                                    "burned-in text/captions and no obvious "
                                    "rendering artifacts"},
+        "consistentOk": {"type": "boolean",
+                         "description": "when a REFERENCE frame is "
+                                        "supplied (the first image): true "
+                                        "ONLY if the clip frames match it "
+                                        "— same person with the SAME hair "
+                                        "length and style, same clothing, "
+                                        "same room/background, same "
+                                        "props. Longer/shorter hair, a "
+                                        "different kitchen, or a changed "
+                                        "product all fail. True when no "
+                                        "reference was supplied."},
         "issues": {"type": "array", "items": {"type": "string"},
                    "description": "each concrete problem found"},
     },
-    "required": ["propsOk", "personOk", "cleanOk", "issues"],
+    "required": ["propsOk", "personOk", "cleanOk", "consistentOk",
+                 "issues"],
 }
 
 
-def video_qa(frame_urls: list, expected: str) -> dict:
-    """Vision QA over sampled frames of a generated video. Raises only on
-    LLM transport errors — callers decide whether to fail open."""
+def video_qa(frame_urls: list, expected: str,
+             reference_frame: str = "") -> dict:
+    """Vision QA over sampled frames of a generated video. When
+    ``reference_frame`` is given (the anchor/start frame), the clip must
+    also stay CONSISTENT with it — hair length/style, clothing, setting,
+    props. Raises only on LLM transport errors — callers decide whether
+    to fail open."""
     import re
-    inputs = [{"type": "image", "url": u} for u in frame_urls[:4]]
+    inputs = []
+    ref_note = ""
+    if (reference_frame or "").strip():
+        inputs.append({"type": "image", "url": reference_frame.strip()})
+        ref_note = (" The FIRST image is the REFERENCE frame the video "
+                    "was anchored to — every following frame must match "
+                    "it: same person with the same hair length and "
+                    "style, same clothing, same room, same props. Judge "
+                    "consistentOk strictly against it.")
+    inputs += [{"type": "image", "url": u} for u in frame_urls[:4]]
     res = _llm().complete_structured(
         instructions=(
             "You are quality-checking frames sampled from an AI-generated "
@@ -547,7 +572,8 @@ def video_qa(frame_urls: list, expected: str) -> dict:
             + " Fail propsOk on ANY duplicated prop (two microphones, two "
               "identical tumblers, extra phones), fail personOk on broken "
               "anatomy or an inconsistent person between frames, fail "
-              "cleanOk on unwanted burned-in captions or glitch artifacts."),
+              "cleanOk on unwanted burned-in captions or glitch artifacts."
+            + ref_note),
         input=inputs,
         json_schema=_VIDEO_QA_SCHEMA,
         schema_name="video_qa",
@@ -564,7 +590,8 @@ def video_qa(frame_urls: list, expected: str) -> dict:
     if not isinstance(parsed, dict):
         raise RuntimeError("video QA returned nothing usable")
     ok = bool(parsed.get("propsOk")) and bool(parsed.get("personOk")) \
-        and bool(parsed.get("cleanOk"))
+        and bool(parsed.get("cleanOk")) \
+        and bool(parsed.get("consistentOk", True))
     return {"ok": ok,
             "issues": [str(i)[:140] for i in (parsed.get("issues")
                                               or [])][:5]}
