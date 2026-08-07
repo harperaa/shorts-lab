@@ -1465,6 +1465,43 @@
     return h("img", p);
   }
 
+  function AuthVideo(props) {
+    // same story as AuthImg: plugin-served video needs the loopback
+    // session token, which a bare <video> src can't carry
+    var srcSt = useState(null);
+    var src = srcSt[0], setSrc = srcSt[1];
+    useEffect(function () {
+      var url = props.src;
+      var tok = null;
+      try { tok = window.__HERMES_SESSION_TOKEN__ || null; } catch (e) {}
+      if (!url || url.indexOf("/api/") !== 0 || !tok) {
+        setSrc(url || null);
+        return undefined;
+      }
+      var dead = false;
+      var obj = null;
+      fetch(url, { headers: { "X-Hermes-Session-Token": tok } })
+        .then(function (r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.blob();
+        })
+        .then(function (b) {
+          obj = URL.createObjectURL(b);
+          if (!dead) setSrc(obj);
+        })
+        .catch(function () { if (!dead) setSrc(url); });
+      return function () {
+        dead = true;
+        if (obj) URL.revokeObjectURL(obj);
+      };
+    }, [props.src]);
+    if (!src) return h("div", { className: "sl-note" }, "loading video…");
+    var p = {};
+    Object.keys(props).forEach(function (k) { p[k] = props[k]; });
+    p.src = src;
+    return h("video", p);
+  }
+
   function AdvancedStudio(props) {
     var st = props.st;
     var openSt = useState(function () {
@@ -2608,7 +2645,7 @@
                       : null)
                 : null,
               c.resultUrl && c.kind === "video-ad"
-                ? h("video", { className: "sl-result-img",
+                ? h(AuthVideo, { className: "sl-result-img",
                     style: { maxWidth: 460, width: "100%", marginTop: 10 },
                     src: c.resultUrl, controls: true, preload: "metadata" })
                 : null,
