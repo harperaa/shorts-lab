@@ -285,7 +285,13 @@ _AD_PROMPT_SCHEMA = {
                                                "same structure and a "
                                                "comparable word count — "
                                                "never compress it to a "
-                                               "couple of sentences"},
+                                               "couple of sentences. "
+                                               "Bullet lines (✅ • - or "
+                                               "emoji-led list items) are "
+                                               "FACTS of the offer: copy "
+                                               "them VERBATIM into every "
+                                               "variant — never reworded, "
+                                               "dropped, or invented"},
                     "cta": {"type": "string",
                             "description": "the closing call to action "
                                            "line"},
@@ -379,7 +385,10 @@ def build_ad_prompt(brief: str, ad_context: str = "",
         "copy — not the in-image text). Post-copy content must mirror "
         "the original's SHAPE AND LENGTH — keep its bullets, emojis, "
         "line breaks, and paragraph rhythm; do not shrink long copy "
-        "into a summary.\n\n"
+        "into a summary. Any bullet lines in the original are factual "
+        "features of the offer: reproduce them WORD FOR WORD in every "
+        "variant (vary only the prose around them) — never guess, "
+        "reword, or invent bullet content.\n\n"
         f"USER'S BRIEF (product/offer/audience): {brief.strip()[:2000]}"
         + ad_note + identity_note + variant_note + marketing_context())
     return dict(_complete(
