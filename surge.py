@@ -193,7 +193,7 @@ h1 { margin: 4px 0 26px; font-size: 26px; }
         border-radius: 6px; padding: 2px 9px; font-size: 11.5px;
         cursor: pointer; flex-shrink: 0; }
 .copy:hover { border-color: #14b8a6; color: #14b8a6; }
-.copyall { margin: 2px 0 14px; }
+.copyall { display: block; margin: 2px 0 12px auto; }
 .takes { margin-top: 16px; }
 .takes h3 { margin: 0 0 8px; font-size: 13px; color: #9aa0b4; }
 .foot { color: #9aa0b4; font-size: 12px; margin-top: 30px; }
