@@ -930,7 +930,6 @@ def test_surge_page_has_variants_and_copy_buttons(home):
 
 def test_surge_publish_tars_files_and_records(home, monkeypatch):
     import io, tarfile
-    monkeypatch.setenv("SURGE_LOGIN", "allen@example.com")
     monkeypatch.setenv("SURGE_TOKEN", "tok123")
     aid = kie.save_asset("hero.png", b"\x89PNG-fake" * 5)
     cid = store.create_creation(
@@ -945,24 +944,47 @@ def test_surge_publish_tars_files_and_records(home, monkeypatch):
     def fake_put(url, data=None, auth=None, headers=None, timeout=None):
         sent["url"] = url
         sent["auth"] = auth
+        sent["headers"] = headers
         with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
             sent["names"] = sorted(m.name for m in tar.getmembers())
-        return _FakeResp(200)
+        resp = _FakeResp(200)
+        resp.text = ('{"type":"progress","written":10}\n'
+                     '{"type":"info","domain":"my-pack.surge.sh"}\n')
+        return resp
 
     monkeypatch.setattr(surge.requests, "put", fake_put)
     entry = surge.publish([cid], domain="my-pack")
     assert entry["url"] == "https://my-pack.surge.sh"
-    assert sent["auth"] == ("allen@example.com", "tok123")
+    assert sent["auth"] == ("token", "tok123")   # surge's literal username
     assert sent["url"].endswith("/my-pack.surge.sh")
-    assert sent["names"] == [f"ad-{cid}.png", "index.html"]
+    assert sent["headers"]["Content-Type"] == "application/gzip"
+    assert sent["headers"]["file-count"] == "2"
+    assert sent["names"] == [f"my-pack/ad-{cid}.png", "my-pack/index.html"]
     assert (store.kv_get("surgePages") or [])[0]["domain"] == "my-pack.surge.sh"
 
     with pytest.raises(RuntimeError, match="no ready ads"):
         surge.publish([99999])
 
 
+def test_surge_publish_requires_info_event(home, monkeypatch):
+    monkeypatch.setenv("SURGE_TOKEN", "tok123")
+    aid = kie.save_asset("h2.png", b"\x89PNG" * 9)
+    cid = store.create_creation("image-ad", "Ad2", "b", "c", status="ready",
+                                source={})
+    store.update_creation(cid, status="ready",
+                          result_url=f"/api/plugins/shorts-lab/asset/{aid}")
+
+    def fake_put(url, data=None, auth=None, headers=None, timeout=None):
+        resp = _FakeResp(200)
+        resp.text = '{"type":"error","message":"quota exceeded"}\n'
+        return resp
+
+    monkeypatch.setattr(surge.requests, "put", fake_put)
+    with pytest.raises(RuntimeError, match="quota exceeded"):
+        surge.publish([cid])
+
+
 def test_surge_list_and_validate(home, monkeypatch):
-    monkeypatch.setenv("SURGE_LOGIN", "a@b.c")
     monkeypatch.setenv("SURGE_TOKEN", "tok")
 
     monkeypatch.setattr(surge.requests, "get",
@@ -973,8 +995,8 @@ def test_surge_list_and_validate(home, monkeypatch):
     pages = surge.list_pages()
     assert [p["url"] for p in pages] == ["https://pack1.surge.sh",
                                         "https://pack2.surge.sh"]
-    assert surge.validate("a@b.c", "tok")["ok"] is True
+    assert surge.validate("tok")["ok"] is True
 
     monkeypatch.setattr(surge.requests, "get",
                         lambda url, auth=None, timeout=None: _FakeResp(401))
-    assert surge.validate("a@b.c", "bad")["ok"] is False
+    assert surge.validate("bad")["ok"] is False

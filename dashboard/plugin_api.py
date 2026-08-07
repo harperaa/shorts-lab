@@ -286,16 +286,11 @@ def connect(body: ConnectBody):
                 status_code=400,
                 detail=f"imgBB rejected the key: {check.get('error')}")
     elif body.env == "SURGE_TOKEN":
-        login = (body.login or "").strip()
-        if not login:
-            raise HTTPException(status_code=400,
-                                detail="the surge account email is required")
-        check = surge.validate(login, key)
+        check = surge.validate(key)
         if not check.get("ok"):
             raise HTTPException(
                 status_code=400,
-                detail=f"surge rejected the credentials: {check.get('error')}")
-        meta_ads.store_key("SURGE_LOGIN", login)
+                detail=f"surge rejected the token: {check.get('error')}")
     try:
         meta_ads.store_key(body.env, key)
     except ValueError as exc:

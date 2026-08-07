@@ -1,9 +1,11 @@
 """surge.sh publishing — hand finished ad packs to the editor.
 
-Talks to surge's own REST endpoints (the same ones the surge CLI uses:
-basic auth with account email + token, `GET /list` for published pages,
-`PUT /:domain` with a gzipped tarball to publish), so no node runtime is
-needed in the container. The published page is a single self-contained
+Talks to surge's own REST endpoints — protocol read from the surge /
+surge-sdk / surge-stream npm packages: basic auth is username "token" +
+the account token, `GET /list` lists published pages, and publish is
+`PUT /:domain` with a gzipped tarball whose entries are prefixed with a
+directory name; the NDJSON response only counts as success when a
+`type:"info"` event arrives. No node runtime needed in the container. The published page is a single self-contained
 index.html plus the ad images: each selected creation renders its image
 beside the three post-copy variants (hook / content / CTA blocks) with
 one-click copy buttons for the editor.
@@ -29,36 +31,40 @@ BASE_URL = os.environ.get("SURGE_BASE_URL", "https://surge.surge.sh")
 _TIMEOUT = 60
 
 
-def creds() -> tuple:
-    login = (os.environ.get("SURGE_LOGIN") or "").strip()
-    token = (os.environ.get("SURGE_TOKEN") or "").strip()
-    return login, token
+_CLI_VERSION = "0.41.2"     # the CLI release whose protocol this mirrors
+
+
+def token() -> str:
+    return (os.environ.get("SURGE_TOKEN") or "").strip()
+
+
+def _auth(tok: str = "") -> tuple:
+    # surge basic auth is the literal username "token" + the account token
+    return ("token", tok or token())
 
 
 def is_connected() -> bool:
-    login, token = creds()
-    return bool(login and token)
+    return bool(token())
 
 
-def validate(login: str, token: str) -> dict:
+def validate(tok: str) -> dict:
     """Cheapest possible auth check: the account's project list."""
     try:
-        r = requests.get(f"{BASE_URL}/list", auth=(login, token),
+        r = requests.get(f"{BASE_URL}/list", auth=_auth(tok),
                          timeout=_TIMEOUT)
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"surge unreachable: {exc}"}
     if r.status_code == 200:
         return {"ok": True}
     return {"ok": False,
-            "error": f"surge rejected the credentials (HTTP {r.status_code})"}
+            "error": f"surge rejected the token (HTTP {r.status_code})"}
 
 
 def list_pages() -> list:
     """Published pages on the account, newest first."""
-    login, token = creds()
-    if not (login and token):
+    if not token():
         raise RuntimeError("surge.sh is not connected")
-    r = requests.get(f"{BASE_URL}/list", auth=(login, token),
+    r = requests.get(f"{BASE_URL}/list", auth=_auth(),
                      timeout=_TIMEOUT)
     if r.status_code != 200:
         raise RuntimeError(f"surge list failed (HTTP {r.status_code})")
@@ -259,10 +265,9 @@ def _default_domain() -> str:
 
 
 def publish(creation_ids: list, domain: str = "") -> dict:
-    login, token = creds()
-    if not (login and token):
+    if not token():
         raise RuntimeError("surge.sh is not connected — add your surge "
-                           "email and token first")
+                           "token first")
     creations = []
     for cid in creation_ids:
         c = store.get_creation(int(cid))
@@ -280,28 +285,54 @@ def publish(creation_ids: list, domain: str = "") -> dict:
         images[c["id"]] = name
     files["index.html"] = build_page(creations, images).encode()
 
-    buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
-        for name, payload in files.items():
-            info = tarfile.TarInfo(name=name)
-            info.size = len(payload)
-            info.mtime = int(time.time())
-            tar.addfile(info, io.BytesIO(payload))
-    buf.seek(0)
-
     domain = (domain or "").strip() or _default_domain()
     if not domain.endswith(".surge.sh") and "." not in domain:
         domain += ".surge.sh"
-    r = requests.put(f"{BASE_URL}/{domain}", data=buf.getvalue(),
-                     auth=(login, token),
-                     headers={"Content-Type": "application/octet-stream",
-                              "file-count": str(len(files)),
-                              "version": "0.24.6"},
-                     timeout=300)
+
+    # tar entries ride under a directory prefix, exactly like the CLI's
+    # tar.c({portable, mtime: epoch}, ["dirname/file", ...])
+    prefix = re.sub(r"[^a-z0-9-]", "-", domain.split(".")[0]) or "adpack"
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        for name, payload in files.items():
+            info = tarfile.TarInfo(name=f"{prefix}/{name}")
+            info.size = len(payload)
+            info.mtime = 0
+            tar.addfile(info, io.BytesIO(payload))
+    buf.seek(0)
+    body = buf.getvalue()
+
+    r = requests.put(
+        f"{BASE_URL}/{domain}", data=body, auth=_auth(),
+        headers={"Content-Type": "application/gzip",
+                 "Accept": "application/x-ndjson",
+                 "version": _CLI_VERSION,
+                 "file-count": str(len(files)),
+                 "project-size": str(len(body)),
+                 "timestamp": str(int(time.time()))},
+        timeout=300)
     if r.status_code >= 300:
         raise RuntimeError(
             f"surge publish failed (HTTP {r.status_code}): "
             f"{(r.text or '')[:200]}")
+    # NDJSON stream: only a type:"info" event means the deploy landed
+    ok = False
+    err_msg = ""
+    for line in (r.text or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            evt = json.loads(line)
+        except ValueError:
+            continue
+        if evt.get("type") == "info":
+            ok = True
+        if evt.get("type") in ("error", "fail"):
+            err_msg = str(evt.get("message") or evt)[:200]
+    if not ok:
+        raise RuntimeError("surge publish did not confirm: "
+                           + (err_msg or "no info event in response"))
 
     entry = {"domain": domain, "url": f"https://{domain}",
              "at": time.time(), "ads": [c["id"] for c in creations]}

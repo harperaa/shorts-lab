@@ -768,9 +768,8 @@
         h("code", null, "npx surge login"), " then ",
         h("code", null, "npx surge token"),
         " — it prints your account token."),
-      h("li", null, "Enter the account email and token below. Published " +
-        "pages live at https://<name>.surge.sh — share the link with " +
-        "your editor."));
+      h("li", null, "Paste the token below. Published pages live at " +
+        "https://<name>.surge.sh — share the link with your editor."));
   }
 
   var CONNECT_KINDS = {
@@ -783,8 +782,7 @@
     imgbb: { env: "IMGBB_API_KEY", title: "🔗 Connect imgBB (image hosting)",
              steps: ImgbbSteps, ph: "Paste your imgBB API key" },
     surge: { env: "SURGE_TOKEN", title: "🔗 Connect surge.sh (ad-pack pages)",
-             steps: SurgeSteps, ph: "Paste your surge token",
-             loginPh: "Your surge account email" },
+             steps: SurgeSteps, ph: "Paste your surge token" },
   };
 
   function ConnectModal(props) {
