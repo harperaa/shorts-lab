@@ -211,7 +211,8 @@ def sync_all_pages(countries: str = "US") -> dict:
 
 
 _ALLOWED_KEYS = {"META_ACCESS_TOKEN", "KIE_API_KEY", "TRANSCRIPT_API_KEY",
-                 "APIFY_API_TOKEN", "IMGBB_API_KEY"}
+                 "APIFY_API_TOKEN", "IMGBB_API_KEY",
+                 "SURGE_LOGIN", "SURGE_TOKEN"}
 
 
 def store_key(env_var: str, value: str) -> None:

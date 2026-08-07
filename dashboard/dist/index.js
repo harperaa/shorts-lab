@@ -416,6 +416,52 @@
     var contents = contentSt[0], setContents = contentSt[1];
     var postSelSt = useState({});      // creationId -> active post-copy tab
     var postSel = postSelSt[0], setPostSel = postSelSt[1];
+    var selSt = useState({});          // creationId -> checked for publish
+    var sel = selSt[0], setSel = selSt[1];
+    var pubBusySt = useState(false);
+    var pubBusy = pubBusySt[0], setPubBusy = pubBusySt[1];
+    var pubDoneSt = useState(null);    // {url} after a publish
+    var pubDone = pubDoneSt[0], setPubDone = pubDoneSt[1];
+    var pagesSt = useState(null);      // null=closed, "loading", [] = list
+    var pages = pagesSt[0], setPages = pagesSt[1];
+
+    function toggleSel(id) {
+      var next = {};
+      Object.keys(sel).forEach(function (k) { next[k] = sel[k]; });
+      next[id] = !next[id];
+      setSel(next);
+    }
+
+    function publishSurge() {
+      if (pubBusy) return;
+      if (!st.keys.surge) { setShowConnect("surge"); return; }
+      var ids = Object.keys(sel).filter(function (k) { return sel[k]; })
+        .map(Number);
+      if (!ids.length) {
+        setErr("Tick the ads to publish first (checkbox on each card).");
+        return;
+      }
+      setPubBusy(true); setErr(null); setPubDone(null);
+      postJSON("/adlab/surge/publish", { ids: ids })
+        .then(function (r) {
+          setPubDone(r.page);
+          setSel({});
+          props.onState(r.state);
+        })
+        .catch(function (e) { setErr(String((e && e.message) || e)); })
+        .finally(function () { setPubBusy(false); });
+    }
+
+    function loadPages() {
+      if (!st.keys.surge) { setShowConnect("surge"); return; }
+      setPages("loading");
+      api("/adlab/surge/pages")
+        .then(function (r) { setPages(r.pages || []); })
+        .catch(function (e) {
+          setPages([]);
+          setErr(String((e && e.message) || e));
+        });
+    }
 
     useEffect(function () {
       if (props.draftBrief) setBrief(props.draftBrief);
@@ -518,6 +564,15 @@
                     setOpen(isOpen ? null : c.id);
                     if (!isOpen) loadContent(c.id);
                   } },
+                c.status === "ready"
+                  ? h("input", { type: "checkbox",
+                      checked: !!sel[c.id],
+                      title: "Include in the surge.sh ad pack",
+                      style: { accentColor: "var(--color-primary, #14b8a6)",
+                               cursor: "pointer" },
+                      onClick: function (e) { e.stopPropagation(); },
+                      onChange: function () { toggleSel(c.id); } })
+                  : null,
                 h("span", { className: "sl-chev" + (isOpen ? " sl-chev-open" : "") }, "▸"),
                 h("span", { style: { fontWeight: 700, flex: 1 } }, c.title),
                 c.pattern
@@ -704,6 +759,20 @@
         "(KIE takes URLs only)."));
   }
 
+  function SurgeSteps() {
+    return h("ol", { className: "sl-steps" },
+      h("li", null, "Create a free account at ",
+        extLink("https://surge.sh", "surge.sh"),
+        " (it's the static-hosting service the ad packs publish to)."),
+      h("li", null, "On any machine with node: run ",
+        h("code", null, "npx surge login"), " then ",
+        h("code", null, "npx surge token"),
+        " — it prints your account token."),
+      h("li", null, "Enter the account email and token below. Published " +
+        "pages live at https://<name>.surge.sh — share the link with " +
+        "your editor."));
+  }
+
   var CONNECT_KINDS = {
     apify: { env: "APIFY_API_TOKEN", title: "🔗 Connect Apify (easy path)",
              steps: ApifySteps, ph: "Paste your Apify API token (apify_api_…)" },
@@ -713,11 +782,16 @@
            steps: KieSteps, ph: "Paste your KIE API key" },
     imgbb: { env: "IMGBB_API_KEY", title: "🔗 Connect imgBB (image hosting)",
              steps: ImgbbSteps, ph: "Paste your imgBB API key" },
+    surge: { env: "SURGE_TOKEN", title: "🔗 Connect surge.sh (ad-pack pages)",
+             steps: SurgeSteps, ph: "Paste your surge token",
+             loginPh: "Your surge account email" },
   };
 
   function ConnectModal(props) {
     var keySt = useState("");
     var keyVal = keySt[0], setKeyVal = keySt[1];
+    var loginSt = useState("");
+    var loginVal = loginSt[0], setLoginVal = loginSt[1];
     var busySt = useState(false);
     var busy = busySt[0], setBusy = busySt[1];
     var errSt = useState(null);
@@ -730,6 +804,7 @@
       postJSON("/connect", {
         env: spec.env,
         key: keyVal.trim(),
+        login: loginVal.trim(),
       })
         .then(function (r) { props.onState(r.state); props.onClose(); })
         .catch(function (e) { setErr(String((e && e.message) || e)); })
@@ -743,6 +818,14 @@
         h("div", { style: { fontWeight: 800, fontSize: 15, marginBottom: 8 } },
           spec.title),
         h(spec.steps),
+        spec.loginPh
+          ? h("input", {
+              className: "sl-input", type: "email",
+              placeholder: spec.loginPh, value: loginVal,
+              style: { marginTop: 10 },
+              onChange: function (e) { setLoginVal(e.target.value); },
+            })
+          : null,
         h("input", {
           className: "sl-input", type: "password", autoFocus: true,
           placeholder: spec.ph,
@@ -755,7 +838,9 @@
           h("button", { className: "sl-btn", onClick: props.onClose },
             "Cancel"),
           h("button", { className: "sl-btn sl-btn-primary",
-              disabled: busy || !keyVal.trim(), onClick: save },
+              disabled: busy || !keyVal.trim() ||
+                (spec.loginPh && !loginVal.trim()),
+              onClick: save },
             busy ? "Verifying…" : "Verify & save"))));
   }
 
@@ -1314,6 +1399,52 @@
     var contents = contentSt[0], setContents = contentSt[1];
     var postSelSt = useState({});      // creationId -> active post-copy tab
     var postSel = postSelSt[0], setPostSel = postSelSt[1];
+    var selSt = useState({});          // creationId -> checked for publish
+    var sel = selSt[0], setSel = selSt[1];
+    var pubBusySt = useState(false);
+    var pubBusy = pubBusySt[0], setPubBusy = pubBusySt[1];
+    var pubDoneSt = useState(null);    // {url} after a publish
+    var pubDone = pubDoneSt[0], setPubDone = pubDoneSt[1];
+    var pagesSt = useState(null);      // null=closed, "loading", [] = list
+    var pages = pagesSt[0], setPages = pagesSt[1];
+
+    function toggleSel(id) {
+      var next = {};
+      Object.keys(sel).forEach(function (k) { next[k] = sel[k]; });
+      next[id] = !next[id];
+      setSel(next);
+    }
+
+    function publishSurge() {
+      if (pubBusy) return;
+      if (!st.keys.surge) { setShowConnect("surge"); return; }
+      var ids = Object.keys(sel).filter(function (k) { return sel[k]; })
+        .map(Number);
+      if (!ids.length) {
+        setErr("Tick the ads to publish first (checkbox on each card).");
+        return;
+      }
+      setPubBusy(true); setErr(null); setPubDone(null);
+      postJSON("/adlab/surge/publish", { ids: ids })
+        .then(function (r) {
+          setPubDone(r.page);
+          setSel({});
+          props.onState(r.state);
+        })
+        .catch(function (e) { setErr(String((e && e.message) || e)); })
+        .finally(function () { setPubBusy(false); });
+    }
+
+    function loadPages() {
+      if (!st.keys.surge) { setShowConnect("surge"); return; }
+      setPages("loading");
+      api("/adlab/surge/pages")
+        .then(function (r) { setPages(r.pages || []); })
+        .catch(function (e) {
+          setPages([]);
+          setErr(String((e && e.message) || e));
+        });
+    }
 
     // survive refresh / tab switches — the Clear button resets this
     useEffect(function () {
@@ -1585,6 +1716,43 @@
               "last generation failed: " + job.error)
           : null),
 
+      pages !== null
+        ? h("div", { className: "sl-modal", onClick: function (e) {
+              if (e.target === e.currentTarget) setPages(null);
+            } },
+            h("div", { className: "sl-modal-box" },
+              h("div", { style: { fontWeight: 800, fontSize: 15,
+                  marginBottom: 10 } }, "🌐 Published surge.sh pages"),
+              pages === "loading"
+                ? h("div", { className: "sl-note" }, "Loading…")
+                : pages.length === 0
+                  ? h("div", { className: "sl-note" },
+                      "Nothing published yet.")
+                  : pages.map(function (p) {
+                      return h("div", { key: p.domain,
+                          className: "sl-copytake",
+                          style: { alignItems: "center" } },
+                        h("a", { className: "sl-link", href: p.url,
+                            target: "_blank", rel: "noreferrer",
+                            style: { flex: 1, wordBreak: "break-all" } },
+                          p.domain),
+                        p.timeAgo
+                          ? h("span", { className: "sl-note",
+                              style: { flexShrink: 0 } }, p.timeAgo)
+                          : null,
+                        h("button", { className: "sl-btn",
+                            style: { fontSize: 11, padding: "2px 8px" },
+                            title: "Copy the page URL",
+                            onClick: function () {
+                              try {
+                                navigator.clipboard.writeText(p.url);
+                              } catch (e2) {}
+                            } }, "⧉ copy"));
+                    }),
+              h("div", { className: "sl-modal-row" },
+                h("button", { className: "sl-btn",
+                    onClick: function () { setPages(null); } }, "Close"))))
+        : null,
       h("div", { style: { fontWeight: 800, margin: "4px 0 10px" } },
         "Your ad creatives",
         h("span", { className: "sl-note", style: { fontWeight: 400,
@@ -1601,7 +1769,37 @@
                     style: { marginRight: 5 } }, "◐"),
                 gen + " in progress")
             : null;
-        })()),
+        })(),
+        h("span", { style: { float: "right", display: "inline-flex",
+            gap: 8, fontWeight: 400 } },
+          h("button", { className: "sl-btn", style: { fontSize: 12 },
+              disabled: pubBusy,
+              title: st.keys.surge
+                ? "Publish the ticked ads as a shareable page for your editor"
+                : "Connect your surge.sh account first",
+              onClick: publishSurge },
+            pubBusy
+              ? h(React.Fragment, null,
+                  h("span", { className: "sl-spin",
+                      style: { marginRight: 5 } }, "◐"), "Publishing…")
+              : "▲ Publish on surge.sh"),
+          h("button", { className: "sl-btn", style: { fontSize: 12 },
+              title: "Published ad-pack pages, with copy-link buttons",
+              onClick: loadPages }, "☰ List surge.sh pages"))),
+      pubDone
+        ? h("div", { className: "sl-card", style: { display: "flex",
+              gap: 10, alignItems: "center" } },
+            h("span", null, "🌐 Published: "),
+            h("a", { className: "sl-link", href: pubDone.url,
+                target: "_blank", rel: "noreferrer",
+                style: { flex: 1, wordBreak: "break-all" } }, pubDone.url),
+            h("button", { className: "sl-btn",
+                style: { fontSize: 11, padding: "2px 8px" },
+                onClick: function () {
+                  try { navigator.clipboard.writeText(pubDone.url); }
+                  catch (e2) {}
+                } }, "⧉ copy"))
+        : null,
       adsCreations.length === 0
         ? h("div", { className: "sl-card sl-note" },
             "Nothing yet — describe your offer above and hit ✨.")
@@ -1613,6 +1811,15 @@
                     setOpen(isOpen ? null : c.id);
                     if (!isOpen) loadContent(c.id);
                   } },
+                c.status === "ready"
+                  ? h("input", { type: "checkbox",
+                      checked: !!sel[c.id],
+                      title: "Include in the surge.sh ad pack",
+                      style: { accentColor: "var(--color-primary, #14b8a6)",
+                               cursor: "pointer" },
+                      onClick: function (e) { e.stopPropagation(); },
+                      onChange: function () { toggleSel(c.id); } })
+                  : null,
                 h("span", { className: "sl-chev" + (isOpen ? " sl-chev-open" : "") }, "▸"),
                 h("span", { style: { fontWeight: 700, flex: 1 } }, c.title),
                 c.status === "generating"

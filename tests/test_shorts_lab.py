@@ -28,6 +28,7 @@ meta_ads = importlib.import_module(f"{PKG}.meta_ads")
 kie = importlib.import_module(f"{PKG}.kie")
 analysis = importlib.import_module(f"{PKG}.analysis")
 imagegen = importlib.import_module(f"{PKG}.imagegen")
+surge = importlib.import_module(f"{PKG}.surge")
 
 
 @pytest.fixture()
@@ -884,3 +885,96 @@ def test_import_result_serves_local_plugin_output(home, tmp_path):
     assert spell.startswith("data:image/png;base64,")
     with pytest.raises(RuntimeError):
         imagegen.import_result(str(tmp_path / "gone.png"))
+
+
+# ---------------------------------------------------------------------------
+# surge.sh ad-pack publishing
+# ---------------------------------------------------------------------------
+
+class _FakeResp:
+    def __init__(self, status=200, payload=None, content=b"", headers=None):
+        self.status_code = status
+        self._payload = payload
+        self.content = content
+        self.text = ""
+        self.headers = headers or {}
+
+    def json(self):
+        return self._payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+
+def test_surge_page_has_variants_and_copy_buttons(home):
+    creations = [{"id": 7, "title": "Bootcamp hero",
+                  "source": {"postCopy": [
+                      {"hook": "H1 🚨", "content": "Body with ✅ bullet",
+                       "cta": "Tap now"},
+                      {"hook": "H2", "content": "B2", "cta": "C2"},
+                      {"hook": "H3", "content": "B3", "cta": "C3"}],
+                      "copyTakes": ["Take one", "Take two"]}}]
+    page = surge.build_page(creations, {7: "ad-7.png"})
+    assert 'src="ad-7.png"' in page
+    assert page.count("Variant ") == 3
+    assert "Body with ✅ bullet" in page
+    assert page.count("⧉ copy") >= 5          # hook/content/cta + takes
+    assert "Copy whole variant" in page
+    assert "showTab(7,1)" in page
+    # html injection from copy text stays escaped
+    creations[0]["source"]["postCopy"][0]["hook"] = "<script>alert(1)</script>"
+    page = surge.build_page(creations, {7: "ad-7.png"})
+    assert "<script>alert(1)" not in page
+
+
+def test_surge_publish_tars_files_and_records(home, monkeypatch):
+    import io, tarfile
+    monkeypatch.setenv("SURGE_LOGIN", "allen@example.com")
+    monkeypatch.setenv("SURGE_TOKEN", "tok123")
+    aid = kie.save_asset("hero.png", b"\x89PNG-fake" * 5)
+    cid = store.create_creation(
+        "image-ad", "Hero ad", "brief", "content", status="ready",
+        source={"postCopy": [{"hook": "H", "content": "C", "cta": "T"}],
+                "copyTakes": ["take"]})
+    store.update_creation(cid, status="ready",
+                          result_url=f"/api/plugins/shorts-lab/asset/{aid}")
+
+    sent = {}
+
+    def fake_put(url, data=None, auth=None, headers=None, timeout=None):
+        sent["url"] = url
+        sent["auth"] = auth
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
+            sent["names"] = sorted(m.name for m in tar.getmembers())
+        return _FakeResp(200)
+
+    monkeypatch.setattr(surge.requests, "put", fake_put)
+    entry = surge.publish([cid], domain="my-pack")
+    assert entry["url"] == "https://my-pack.surge.sh"
+    assert sent["auth"] == ("allen@example.com", "tok123")
+    assert sent["url"].endswith("/my-pack.surge.sh")
+    assert sent["names"] == [f"ad-{cid}.png", "index.html"]
+    assert (store.kv_get("surgePages") or [])[0]["domain"] == "my-pack.surge.sh"
+
+    with pytest.raises(RuntimeError, match="no ready ads"):
+        surge.publish([99999])
+
+
+def test_surge_list_and_validate(home, monkeypatch):
+    monkeypatch.setenv("SURGE_LOGIN", "a@b.c")
+    monkeypatch.setenv("SURGE_TOKEN", "tok")
+
+    monkeypatch.setattr(surge.requests, "get",
+                        lambda url, auth=None, timeout=None: _FakeResp(
+                            200, payload=[{"domain": "pack1.surge.sh",
+                                           "timeAgo": "2 days ago"},
+                                          {"domain": "pack2.surge.sh"}]))
+    pages = surge.list_pages()
+    assert [p["url"] for p in pages] == ["https://pack1.surge.sh",
+                                        "https://pack2.surge.sh"]
+    assert surge.validate("a@b.c", "tok")["ok"] is True
+
+    monkeypatch.setattr(surge.requests, "get",
+                        lambda url, auth=None, timeout=None: _FakeResp(401))
+    assert surge.validate("a@b.c", "bad")["ok"] is False

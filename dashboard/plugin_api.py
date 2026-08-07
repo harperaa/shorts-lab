@@ -49,6 +49,7 @@ transcripts = importlib.import_module(f"{_PKG}.transcripts")
 meta_ads = importlib.import_module(f"{_PKG}.meta_ads")
 kie = importlib.import_module(f"{_PKG}.kie")
 imagegen = importlib.import_module(f"{_PKG}.imagegen")
+surge = importlib.import_module(f"{_PKG}.surge")
 sync_job = importlib.import_module(f"{_PKG}.sync_job")
 analysis = importlib.import_module(f"{_PKG}.analysis")
 
@@ -134,6 +135,7 @@ def _public_state() -> dict:
             "imgbb": _has_key("IMGBB_API_KEY"),
         },
         "adsSource": meta_ads.get_ads_source(),
+        "surge": surge.is_connected(),
         "autoSync": sync_job.is_enabled(),
         "adlabJob": _sync_state("adlabJobState"),
         "imageBackend": {
@@ -220,9 +222,36 @@ def derivative(body: DerivativeBody):
     return {"ok": True, "creationId": cid, "state": _public_state()}
 
 
+class SurgePublishBody(BaseModel):
+    ids: list = []
+    domain: str = ""
+
+
+@router.post("/adlab/surge/publish")
+def adlab_surge_publish(body: SurgePublishBody):
+    try:
+        entry = surge.publish(body.ids or [], body.domain or "")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=str(exc)[:300])
+    return {"ok": True, "page": entry, "state": _public_state()}
+
+
+@router.get("/adlab/surge/pages")
+def adlab_surge_pages():
+    try:
+        pages = surge.list_pages()
+    except Exception:  # noqa: BLE001 — fall back to what we published
+        pages = [{"domain": p["domain"], "url": p["url"],
+                  "timeAgo": ""} for p in (store.kv_get("surgePages") or [])]
+    return {"ok": True, "pages": pages}
+
+
 class ConnectBody(BaseModel):
     env: str = "META_ACCESS_TOKEN"
     key: str = ""
+    login: str = ""      # surge only: the account email
 
 
 @router.post("/connect")
@@ -256,6 +285,17 @@ def connect(body: ConnectBody):
             raise HTTPException(
                 status_code=400,
                 detail=f"imgBB rejected the key: {check.get('error')}")
+    elif body.env == "SURGE_TOKEN":
+        login = (body.login or "").strip()
+        if not login:
+            raise HTTPException(status_code=400,
+                                detail="the surge account email is required")
+        check = surge.validate(login, key)
+        if not check.get("ok"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"surge rejected the credentials: {check.get('error')}")
+        meta_ads.store_key("SURGE_LOGIN", login)
     try:
         meta_ads.store_key(body.env, key)
     except ValueError as exc:
