@@ -424,6 +424,55 @@
     var pubDone = pubDoneSt[0], setPubDone = pubDoneSt[1];
     var pagesSt = useState(null);      // null=closed, "loading", [] = list
     var pages = pagesSt[0], setPages = pagesSt[1];
+    var metaModSt = useState(false);   // meta publish modal open
+    var metaMod = metaModSt[0], setMetaMod = metaModSt[1];
+    var adsetsSt = useState(null);
+    var adsets = adsetsSt[0], setAdsets = adsetsSt[1];
+    var adsetSt = useState("");
+    var adsetId = adsetSt[0], setAdsetId = adsetSt[1];
+    var linkSt = useState("");
+    var metaLink = linkSt[0], setMetaLink = linkSt[1];
+    var ctaSt = useState("LEARN_MORE");
+    var metaCta = ctaSt[0], setMetaCta = ctaSt[1];
+    var metaBusySt = useState(false);
+    var metaBusy = metaBusySt[0], setMetaBusy = metaBusySt[1];
+    var metaDoneSt = useState(null);
+    var metaDone = metaDoneSt[0], setMetaDone = metaDoneSt[1];
+
+    function openMetaPublish() {
+      if (!st.keys.metaAds) { setShowConnect("metaads"); return; }
+      var ids = Object.keys(sel).filter(function (k) { return sel[k]; });
+      if (!ids.length) {
+        setErr("Tick the ads to publish first (checkbox on each card).");
+        return;
+      }
+      setMetaMod(true); setMetaDone(null);
+      if (adsets === null) {
+        setAdsets("loading");
+        api("/adlab/meta/adsets")
+          .then(function (r) { setAdsets(r.adsets || []); })
+          .catch(function (e) {
+            setAdsets([]);
+            setErr(String((e && e.message) || e));
+          });
+      }
+    }
+
+    function runMetaPublish() {
+      if (metaBusy) return;
+      var ids = Object.keys(sel).filter(function (k) { return sel[k]; })
+        .map(Number);
+      setMetaBusy(true); setMetaDone(null);
+      postJSON("/adlab/meta/publish", {
+        ids: ids, adsetId: adsetId, link: metaLink, cta: metaCta })
+        .then(function (r) {
+          setMetaDone(r.published || []);
+          setSel({});
+          props.onState(r.state);
+        })
+        .catch(function (e) { setMetaDone(String((e && e.message) || e)); })
+        .finally(function () { setMetaBusy(false); });
+    }
 
     function toggleSel(id) {
       var next = {};
@@ -564,7 +613,7 @@
                     setOpen(isOpen ? null : c.id);
                     if (!isOpen) loadContent(c.id);
                   } },
-                c.status === "ready"
+                c.status === "ready" && c.kind === "image-ad"
                   ? h("input", { type: "checkbox",
                       checked: !!sel[c.id],
                       title: "Include in the surge.sh ad pack",
@@ -774,6 +823,34 @@
         "email empty and paste the token in the second field.")));
   }
 
+  function MetaAdsSteps() {
+    return h("ol", { className: "sl-steps" },
+      h("li", null, "You need three values — a token with ads_management, ",
+        "your ad account id, and the Facebook Page the ads run under."),
+      h("li", null, "Token: in ",
+        extLink("https://developers.facebook.com/tools/explorer/",
+          "Graph API Explorer"),
+        " pick your app, add permissions ", h("code", null, "ads_management"),
+        " + ", h("code", null, "pages_show_list"),
+        ", Generate Access Token, then extend it to long-lived in ",
+        extLink("https://developers.facebook.com/tools/debug/accesstoken/",
+          "Access Token Debugger"),
+        " (or mint a permanent System User token in ",
+        extLink("https://business.facebook.com/settings/system-users",
+          "Business settings → System users"), ")."),
+      h("li", null, "Ad account id: ",
+        extLink("https://adsmanager.facebook.com/adsmanager/manage/accounts",
+          "Ads Manager → Accounts"),
+        " — the number after act_ (paste with or without the prefix)."),
+      h("li", null, "Page id: ",
+        extLink("https://www.facebook.com/pages/?category=your_pages",
+          "Your Pages"),
+        " → open the Page → About → Page transparency (or Settings → " +
+        "Page setup) shows the numeric Page ID."),
+      h("li", null, "Ads publish as ", h("b", null, "PAUSED drafts"),
+        " — nothing spends until you launch them in Ads Manager."));
+  }
+
   var CONNECT_KINDS = {
     apify: { env: "APIFY_API_TOKEN", title: "🔗 Connect Apify (easy path)",
              steps: ApifySteps, ph: "Paste your Apify API token (apify_api_…)" },
@@ -788,6 +865,12 @@
              ph: "Password (new account or existing) — or a surge token",
              loginPh: "Email — new address creates the account",
              loginOptional: true },
+    metaads: { env: "META_AD_ACCOUNT_ID",
+               title: "📣 Connect Meta Ads (paused-draft publishing)",
+               steps: MetaAdsSteps,
+               ph: "Access token (ads_management scope)",
+               loginPh: "Ad account id (with or without act_)",
+               extraPh: "Facebook Page id (numeric)" },
   };
 
   function ConnectModal(props) {
@@ -795,6 +878,8 @@
     var keyVal = keySt[0], setKeyVal = keySt[1];
     var loginSt = useState(props.defaultLogin || "");
     var loginVal = loginSt[0], setLoginVal = loginSt[1];
+    var extraSt = useState("");
+    var extraVal = extraSt[0], setExtraVal = extraSt[1];
     var busySt = useState(false);
     var busy = busySt[0], setBusy = busySt[1];
     var errSt = useState(null);
@@ -808,6 +893,7 @@
         env: spec.env,
         key: keyVal.trim(),
         login: loginVal.trim(),
+        extra: extraVal.trim(),
       })
         .then(function (r) { props.onState(r.state); props.onClose(); })
         .catch(function (e) { setErr(String((e && e.message) || e)); })
@@ -823,10 +909,19 @@
         h(spec.steps),
         spec.loginPh
           ? h("input", {
-              className: "sl-input", type: "email",
+              className: "sl-input",
+              type: spec.extraPh ? "text" : "email",
               placeholder: spec.loginPh, value: loginVal,
               style: { marginTop: 10 },
               onChange: function (e) { setLoginVal(e.target.value); },
+            })
+          : null,
+        spec.extraPh
+          ? h("input", {
+              className: "sl-input", type: "text",
+              placeholder: spec.extraPh, value: extraVal,
+              style: { marginTop: 10 },
+              onChange: function (e) { setExtraVal(e.target.value); },
             })
           : null,
         h("input", {
@@ -842,7 +937,8 @@
             "Cancel"),
           h("button", { className: "sl-btn sl-btn-primary",
               disabled: busy || !keyVal.trim() ||
-                (spec.loginPh && !spec.loginOptional && !loginVal.trim()),
+                (spec.loginPh && !spec.loginOptional && !loginVal.trim()) ||
+                (spec.extraPh && !extraVal.trim()),
               onClick: save },
             busy ? "Verifying…" : "Verify & save"))));
   }
@@ -1325,6 +1421,405 @@
                           : props.label + " — click or drop"));
   }
 
+  function AdvancedStudio(props) {
+    var st = props.st;
+    var openSt = useState(function () {
+      try { return localStorage.getItem("sl-adv-open") === "1"; }
+      catch (e) { return false; }
+    });
+    var open = openSt[0], setOpen = openSt[1];
+    var advSt = useState(null);           // /advanced/state payload
+    var adv = advSt[0], setAdv = advSt[1];
+    var secSt = useState("recipes");      // recipes|refs|tools|log
+    var sec = secSt[0], setSec = secSt[1];
+    var folderSt = useState("influencers");
+    var folder = folderSt[0], setFolder = folderSt[1];
+    var pickSt = useState([]);            // selected reference paths
+    var picks = pickSt[0], setPicks = pickSt[1];
+    var recSt = useState("ugc-selfie");
+    var recId = recSt[0], setRecId = recSt[1];
+    var briefSt = useState("");
+    var brief = briefSt[0], setBrief = briefSt[1];
+    var extraSt = useState("");
+    var extra = extraSt[0], setExtra = extraSt[1];
+    var modelSt = useState("");
+    var model = modelSt[0], setModel = modelSt[1];
+    var arSt = useState("9:16");
+    var ar = arSt[0], setAr = arSt[1];
+    var durSt = useState(0);
+    var dur = durSt[0], setDur = durSt[1];
+    var nSt = useState(1);
+    var nVar = nSt[0], setNVar = nSt[1];
+    var busySt = useState(false);
+    var busy = busySt[0], setBusy = busySt[1];
+    var errSt = useState(null);
+    var err = errSt[0], setErr = errSt[1];
+    var okSt = useState(null);
+    var okMsg = okSt[0], setOkMsg = okSt[1];
+    var impSt = useState(false);
+    var importing = impSt[0], setImporting = impSt[1];
+    var avUrlSt = useState("");
+    var avUrl = avUrlSt[0], setAvUrl = avUrlSt[1];
+    var avDescSt = useState("");
+    var avDesc = avDescSt[0], setAvDesc = avDescSt[1];
+
+    function loadAdv() {
+      api("/advanced/state").then(setAdv).catch(function (e) {
+        setErr(String((e && e.message) || e));
+      });
+    }
+    useEffect(function () {
+      if (open && !adv) loadAdv();
+      try { localStorage.setItem("sl-adv-open", open ? "1" : "0"); }
+      catch (e) {}
+    }, [open]);
+
+    var rec = null;
+    if (adv) {
+      (adv.recipes || []).forEach(function (r) {
+        if (r.id === recId) rec = r;
+      });
+    }
+    var isVideo = rec && rec.media === "video";
+    var kieOk = !!(adv && adv.capabilities && adv.capabilities.kie);
+
+    function togglePick(p) {
+      var next = picks.indexOf(p) >= 0
+        ? picks.filter(function (x) { return x !== p; })
+        : picks.concat([p]);
+      setPicks(next);
+    }
+
+    function runRecipe() {
+      if (busy || !rec) return;
+      if (!brief.trim() && rec.kind !== "tool") {
+        setErr("Describe what to make first."); return;
+      }
+      setBusy(true); setErr(null); setOkMsg(null);
+      postJSON("/advanced/recipe/start", {
+        recipe: recId, brief: brief, extra: extra, model: model,
+        aspectRatio: ar, duration: Number(dur) || 0, variants: nVar,
+        refPaths: picks,
+      })
+        .then(function (r) {
+          props.onState(r.state);
+          setOkMsg((r.creationIds || []).length +
+            " creation(s) started — they land in the list below.");
+          setPicks([]);
+        })
+        .catch(function (e) { setErr(String((e && e.message) || e)); })
+        .finally(function () { setBusy(false); });
+    }
+
+    function runAnalyze(kind) {
+      if (busy) return;
+      if (!avUrl.trim() && !avDesc.trim()) {
+        setErr("Give the video URL and describe it."); return;
+      }
+      setBusy(true); setErr(null); setOkMsg(null);
+      postJSON("/advanced/analyze-video",
+        { url: avUrl, description: avDesc, recipe: kind })
+        .then(function (r) {
+          setOkMsg("Template saved: " + r.template.name);
+          loadAdv();
+        })
+        .catch(function (e) { setErr(String((e && e.message) || e)); })
+        .finally(function () { setBusy(false); });
+    }
+
+    function importStarter() {
+      if (importing) return;
+      setImporting(true); setErr(null);
+      postJSON("/reference/import-starter", {})
+        .then(function (r) {
+          setOkMsg("Starter pack: " + r.imported + " imported, " +
+            r.skipped + " already present.");
+          loadAdv();
+        })
+        .catch(function (e) { setErr(String((e && e.message) || e)); })
+        .finally(function () { setImporting(false); });
+    }
+
+    function uploadRef(file) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        var b64 = String(reader.result || "").split(",")[1] || "";
+        postJSON("/reference/upload",
+          { folder: folder, filename: file.name, dataBase64: b64 })
+          .then(function () { loadAdv(); })
+          .catch(function (e) { setErr(String((e && e.message) || e)); });
+      };
+      reader.readAsDataURL(file);
+    }
+
+    var refInputRef = useRef(null);
+
+    return h("div", { className: "sl-card" },
+      h("div", { className: "sl-creation-head",
+          onClick: function () { setOpen(!open); } },
+        h("span", { className: "sl-chev" + (open ? " sl-chev-open" : "") },
+          "▸"),
+        h("span", { style: { fontWeight: 800, flex: 1 } },
+          "⚙ Advanced studio"),
+        h("span", { className: "sl-note" },
+          "references · recipes · video · pipelines")),
+      !open ? null : !adv
+        ? h("div", { className: "sl-note", style: { marginTop: 10 } },
+            "Loading studio…")
+        : h("div", { style: { marginTop: 12 } },
+            h("div", { style: { display: "flex", gap: 6, flexWrap: "wrap",
+                marginBottom: 12 } },
+              [["recipes", "✨ Recipes"], ["refs", "🗂 References"],
+               ["tools", "🔎 Reverse-engineer"], ["log", "🧾 Log"]]
+                .map(function (t) {
+                  return h("button", { key: t[0], className: "sl-tag",
+                      style: sec === t[0]
+                        ? { color: "var(--color-primary, #14b8a6)",
+                            borderColor: "color-mix(in srgb, var(--color-primary, #14b8a6) 60%, transparent)",
+                            cursor: "pointer" }
+                        : { cursor: "pointer" },
+                      onClick: function () { setSec(t[0]); } }, t[1]);
+                })),
+
+            sec === "refs" ? h("div", null,
+              h("div", { style: { display: "flex", gap: 6, flexWrap: "wrap",
+                  alignItems: "center", marginBottom: 10 } },
+                ["influencers", "products", "aesthetics", "examples"]
+                  .map(function (f) {
+                    return h("button", { key: f, className: "sl-tag",
+                        style: folder === f
+                          ? { color: "var(--color-primary, #14b8a6)",
+                              borderColor: "color-mix(in srgb, var(--color-primary, #14b8a6) 60%, transparent)",
+                              cursor: "pointer" }
+                          : { cursor: "pointer" },
+                        onClick: function () { setFolder(f); } }, f);
+                  }),
+                h("span", { style: { flex: 1 } }),
+                h("button", { className: "sl-btn",
+                    style: { fontSize: 12 },
+                    onClick: function () {
+                      if (refInputRef.current) refInputRef.current.click();
+                    } }, "⬆ Upload"),
+                h("input", { type: "file", accept: "image/*",
+                    style: { display: "none" }, ref: refInputRef,
+                    onChange: function (e) {
+                      var f = e.target.files && e.target.files[0];
+                      if (f) uploadRef(f);
+                    } }),
+                h("button", { className: "sl-btn",
+                    style: { fontSize: 12 }, disabled: importing,
+                    title: "Pull the ad-builder kit's influencer sheets, " +
+                      "products, and ugc-selfie style frames",
+                    onClick: importStarter },
+                  importing ? "◐ Importing…" : "📦 Import starter pack")),
+              h("div", { className: "sl-note",
+                  style: { marginBottom: 8 } },
+                "Click a reference to attach it to the next recipe run (" +
+                picks.length + " selected). Influencer sheets: hero, " +
+                "close-up, and full-body per character."),
+              h("div", { style: { display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))",
+                  gap: 8 } },
+                ((adv.references || {})[folder] || []).map(function (rf) {
+                  var on = picks.indexOf(rf.path) >= 0;
+                  return h("div", { key: rf.path,
+                      style: { position: "relative", cursor: "pointer" },
+                      title: rf.path,
+                      onClick: function () { togglePick(rf.path); } },
+                    h("img", { src: API + "/reference/" + rf.path,
+                        style: { width: "100%", height: 96,
+                          objectFit: "cover", borderRadius: 8,
+                          border: on
+                            ? "2px solid var(--color-primary, #14b8a6)"
+                            : "1px solid var(--color-border, #2b2b44)" } }),
+                    rf.group
+                      ? h("div", { className: "sl-note",
+                          style: { fontSize: 9.5, overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap" } }, rf.group)
+                      : null);
+                })),
+              ((adv.references || {})[folder] || []).length === 0
+                ? h("div", { className: "sl-note" },
+                    "Empty — upload images or import the starter pack.")
+                : null) : null,
+
+            sec === "recipes" ? h("div", null,
+              h("div", { style: { display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))",
+                  gap: 8, marginBottom: 12 } },
+                (adv.recipes || []).filter(function (r) {
+                  return r.kind !== "tool";
+                }).map(function (r) {
+                  var on = r.id === recId;
+                  return h("div", { key: r.id,
+                      className: "sl-copytake",
+                      style: { cursor: "pointer", flexDirection: "column",
+                        alignItems: "stretch",
+                        borderColor: on
+                          ? "color-mix(in srgb, var(--color-primary, #14b8a6) 60%, transparent)"
+                          : undefined },
+                      onClick: function () {
+                        setRecId(r.id); setModel(r.model || "");
+                      } },
+                    h("div", { style: { fontWeight: 800,
+                        fontSize: 12.5 } },
+                      r.emoji + " " + r.name,
+                      r.media === "video"
+                        ? h("span", { className: "sl-note",
+                            style: { marginLeft: 6, fontSize: 10 } },
+                            "🎬 video · KIE")
+                        : null),
+                    h("div", { className: "sl-note",
+                        style: { fontSize: 11 } }, r.desc));
+                })),
+              rec && isVideo && !kieOk
+                ? h("div", { className: "sl-err",
+                    style: { marginBottom: 8 } },
+                    "🎬 Video + sound run on KIE only — the instance " +
+                    "image model (" +
+                    (((adv.capabilities || {}).instanceModel || {}).model ||
+                      "grok") +
+                    ") does images, not video. Connect KIE to run this " +
+                    "recipe.")
+                : null,
+              h("textarea", { className: "sl-input", rows: 3,
+                  placeholder: rec && rec.id === "character-sheet"
+                    ? "Describe the influencer — age, hair, features, " +
+                      "lighting… (name goes in Extra direction)"
+                    : "What are we making? Product, audience, message…",
+                  value: brief,
+                  onChange: function (e) { setBrief(e.target.value); } }),
+              h("input", { className: "sl-input",
+                  style: { marginTop: 8 },
+                  placeholder: rec && rec.id === "character-sheet"
+                    ? "Influencer name (folder slug)"
+                    : "Extra direction (optional)",
+                  value: extra,
+                  onChange: function (e) { setExtra(e.target.value); } }),
+              h("div", { style: { display: "flex", gap: 10,
+                  alignItems: "center", flexWrap: "wrap",
+                  marginTop: 10 } },
+                isVideo
+                  ? h("select", { className: "sl-input",
+                      style: { width: "auto" }, value: model,
+                      onChange: function (e) { setModel(e.target.value); } },
+                      Object.keys(adv.models || {}).filter(function (m) {
+                        return adv.models[m].type === "video";
+                      }).map(function (m) {
+                        var mi = adv.models[m];
+                        return h("option", { key: m, value: m },
+                          mi.label + (mi.audio ? " · 🔊" : " · silent"));
+                      }))
+                  : null,
+                isVideo && model && adv.models[model]
+                  ? h("select", { className: "sl-input",
+                      style: { width: "auto" }, value: String(dur),
+                      onChange: function (e) { setDur(e.target.value); } },
+                      [h("option", { key: "auto", value: "0" }, "auto")]
+                        .concat((adv.models[model].durations || [])
+                          .map(function (d) {
+                            return h("option", { key: d, value: String(d) },
+                              d + "s");
+                          })))
+                  : null,
+                h("select", { className: "sl-input",
+                    style: { width: "auto" }, value: ar,
+                    onChange: function (e) { setAr(e.target.value); } },
+                  ["9:16", "16:9", "1:1", "4:5", "3:2", "2:3"]
+                    .map(function (a) {
+                      return h("option", { key: a, value: a }, a);
+                    })),
+                h("select", { className: "sl-input",
+                    style: { width: "auto" }, value: String(nVar),
+                    onChange: function (e) {
+                      setNVar(Number(e.target.value));
+                    } },
+                  [1, 2, 3, 4].map(function (n) {
+                    return h("option", { key: n, value: String(n) }, n);
+                  })),
+                h("button", { className: "sl-btn sl-btn-primary",
+                    disabled: busy || (isVideo && !kieOk),
+                    onClick: runRecipe },
+                  busy
+                    ? h(React.Fragment, null,
+                        h("span", { className: "sl-spin",
+                            style: { marginRight: 6 } }, "◐"),
+                        "Working…")
+                    : "✨ Run recipe"),
+                picks.length
+                  ? h("span", { className: "sl-note" },
+                      picks.length + " reference(s) attached")
+                  : null)) : null,
+
+            sec === "tools" ? h("div", null,
+              h("div", { className: "sl-note",
+                  style: { marginBottom: 8 } },
+                "Reverse-engineer a reference video into a reusable " +
+                "Seedance template, or clone it straight onto your " +
+                "product."),
+              h("input", { className: "sl-input",
+                  placeholder: "Reference video URL",
+                  value: avUrl,
+                  onChange: function (e) { setAvUrl(e.target.value); } }),
+              h("textarea", { className: "sl-input", rows: 3,
+                  style: { marginTop: 8 },
+                  placeholder: "Describe the video shot by shot — hook, " +
+                    "scenes, text overlays, audio…",
+                  value: avDesc,
+                  onChange: function (e) { setAvDesc(e.target.value); } }),
+              h("div", { style: { display: "flex", gap: 10,
+                  marginTop: 10 } },
+                h("button", { className: "sl-btn", disabled: busy,
+                    onClick: function () { runAnalyze("analyze-video"); } },
+                  "🔎 Extract template"),
+                h("button", { className: "sl-btn", disabled: busy,
+                    onClick: function () { runAnalyze("clone-ad"); } },
+                  "🧪 Clone for my product")),
+              (adv.videoTemplates || []).length
+                ? h("div", { style: { marginTop: 12 } },
+                    h("div", { style: { fontWeight: 800, fontSize: 13,
+                        marginBottom: 6 } }, "Saved templates"),
+                    (adv.videoTemplates || []).map(function (t, i) {
+                      return h("div", { key: i, className: "sl-copytake" },
+                        h("span", { style: { flex: 1 } },
+                          h("b", null, t.name),
+                          h("span", { className: "sl-note",
+                              style: { marginLeft: 6 } },
+                            (t.parameters || []).join(", "))),
+                        h("button", { className: "sl-btn",
+                            style: { fontSize: 11, padding: "2px 8px" },
+                            title: "Copy the template prompt",
+                            onClick: function () {
+                              try {
+                                navigator.clipboard.writeText(t.template);
+                              } catch (e2) {}
+                            } }, "⧉"));
+                    }))
+                : null) : null,
+
+            sec === "log" ? h("div", null,
+              (adv.log || []).length === 0
+                ? h("div", { className: "sl-note" },
+                    "No generations logged yet.")
+                : (adv.log || []).map(function (row, i) {
+                    return h("div", { key: i, className: "sl-copytake",
+                        style: { fontSize: 11.5 } },
+                      h("span", { style: { flex: 1 } },
+                        row.model + " · " + row.kind +
+                        (row.duration ? " · " + row.duration + "s" : "")),
+                      h("span", { className: "sl-note" },
+                        new Date((row.at || 0) * 1000)
+                          .toLocaleString()));
+                  })) : null,
+
+            err ? h("div", { className: "sl-err",
+                style: { marginTop: 8 } }, err) : null,
+            okMsg ? h("div", { style: { marginTop: 8, fontSize: 12.5,
+                color: "var(--color-primary, #14b8a6)" } }, okMsg)
+              : null));
+  }
+
   function AdLabTabWrap(props) {
     return h(AdsLabTab, props);
   }
@@ -1410,6 +1905,55 @@
     var pubDone = pubDoneSt[0], setPubDone = pubDoneSt[1];
     var pagesSt = useState(null);      // null=closed, "loading", [] = list
     var pages = pagesSt[0], setPages = pagesSt[1];
+    var metaModSt = useState(false);   // meta publish modal open
+    var metaMod = metaModSt[0], setMetaMod = metaModSt[1];
+    var adsetsSt = useState(null);
+    var adsets = adsetsSt[0], setAdsets = adsetsSt[1];
+    var adsetSt = useState("");
+    var adsetId = adsetSt[0], setAdsetId = adsetSt[1];
+    var linkSt = useState("");
+    var metaLink = linkSt[0], setMetaLink = linkSt[1];
+    var ctaSt = useState("LEARN_MORE");
+    var metaCta = ctaSt[0], setMetaCta = ctaSt[1];
+    var metaBusySt = useState(false);
+    var metaBusy = metaBusySt[0], setMetaBusy = metaBusySt[1];
+    var metaDoneSt = useState(null);
+    var metaDone = metaDoneSt[0], setMetaDone = metaDoneSt[1];
+
+    function openMetaPublish() {
+      if (!st.keys.metaAds) { setShowConnect("metaads"); return; }
+      var ids = Object.keys(sel).filter(function (k) { return sel[k]; });
+      if (!ids.length) {
+        setErr("Tick the ads to publish first (checkbox on each card).");
+        return;
+      }
+      setMetaMod(true); setMetaDone(null);
+      if (adsets === null) {
+        setAdsets("loading");
+        api("/adlab/meta/adsets")
+          .then(function (r) { setAdsets(r.adsets || []); })
+          .catch(function (e) {
+            setAdsets([]);
+            setErr(String((e && e.message) || e));
+          });
+      }
+    }
+
+    function runMetaPublish() {
+      if (metaBusy) return;
+      var ids = Object.keys(sel).filter(function (k) { return sel[k]; })
+        .map(Number);
+      setMetaBusy(true); setMetaDone(null);
+      postJSON("/adlab/meta/publish", {
+        ids: ids, adsetId: adsetId, link: metaLink, cta: metaCta })
+        .then(function (r) {
+          setMetaDone(r.published || []);
+          setSel({});
+          props.onState(r.state);
+        })
+        .catch(function (e) { setMetaDone(String((e && e.message) || e)); })
+        .finally(function () { setMetaBusy(false); });
+    }
 
     function toggleSel(id) {
       var next = {};
@@ -1508,7 +2052,8 @@
     }
 
     var adsCreations = (st.creations || []).filter(function (c) {
-      return c.kind === "image-ad";
+      return c.kind === "image-ad" || c.kind === "video-ad" ||
+        c.kind === "pipeline";
     });
 
     return h("div", null,
@@ -1720,6 +2265,67 @@
               "last generation failed: " + job.error)
           : null),
 
+      h(AdvancedStudio, { st: st, onState: props.onState }),
+      metaMod
+        ? h("div", { className: "sl-modal", onClick: function (e) {
+              if (e.target === e.currentTarget) setMetaMod(false);
+            } },
+            h("div", { className: "sl-modal-box" },
+              h("div", { style: { fontWeight: 800, fontSize: 15,
+                  marginBottom: 6 } },
+                "📣 Publish to Meta — PAUSED drafts"),
+              h("div", { className: "sl-note",
+                  style: { marginBottom: 10 } },
+                "One ad per ticked creative, created PAUSED in the ad " +
+                "set you pick — review and launch in Ads Manager. Post " +
+                "copy variants ride along as the ad's text options."),
+              adsets === "loading"
+                ? h("div", { className: "sl-note" }, "Loading ad sets…")
+                : h("select", { className: "sl-input", value: adsetId,
+                    onChange: function (e) { setAdsetId(e.target.value); } },
+                    [h("option", { key: "", value: "" },
+                      "— pick the target ad set —")]
+                      .concat((adsets || []).map(function (a) {
+                        return h("option", { key: a.id, value: a.id },
+                          (a.campaign ? a.campaign + " › " : "") + a.name +
+                          " (" + a.status + ")");
+                      }))),
+              h("input", { className: "sl-input",
+                  style: { marginTop: 8 },
+                  placeholder: "Destination link (https://…)",
+                  value: metaLink,
+                  onChange: function (e) { setMetaLink(e.target.value); } }),
+              h("select", { className: "sl-input",
+                  style: { marginTop: 8, width: "auto" }, value: metaCta,
+                  onChange: function (e) { setMetaCta(e.target.value); } },
+                ["LEARN_MORE", "SHOP_NOW", "SIGN_UP", "SUBSCRIBE",
+                 "GET_OFFER", "CONTACT_US", "DOWNLOAD", "APPLY_NOW"]
+                  .map(function (c) {
+                    return h("option", { key: c, value: c },
+                      c.replace("_", " ")); })),
+              Array.isArray(metaDone)
+                ? h("div", { style: { marginTop: 10, fontSize: 12.5,
+                    color: "var(--color-primary, #14b8a6)" } },
+                    "✓ " + metaDone.length + " paused ad(s) created — " +
+                    "find them in Ads Manager.")
+                : (metaDone
+                    ? h("div", { className: "sl-err",
+                        style: { marginTop: 8 } }, metaDone)
+                    : null),
+              h("div", { className: "sl-modal-row" },
+                h("button", { className: "sl-btn",
+                    onClick: function () { setMetaMod(false); } }, "Close"),
+                h("button", { className: "sl-btn sl-btn-primary",
+                    disabled: metaBusy || !adsetId ||
+                      !/^https?:\/\//.test(metaLink),
+                    onClick: runMetaPublish },
+                  metaBusy
+                    ? h(React.Fragment, null,
+                        h("span", { className: "sl-spin",
+                            style: { marginRight: 6 } }, "◐"),
+                        "Publishing…")
+                    : "📣 Create paused ads"))))
+        : null,
       pages !== null
         ? h("div", { className: "sl-modal", onClick: function (e) {
               if (e.target === e.currentTarget) setPages(null);
@@ -1820,7 +2426,23 @@
               : "▲ Publish on surge.sh"),
           h("button", { className: "sl-btn", style: { fontSize: 12 },
               title: "Published ad-pack pages, with copy-link buttons",
-              onClick: loadPages }, "☰ List surge.sh pages"))),
+              onClick: loadPages }, "☰ List surge.sh pages"),
+          h("button", {
+              className: "sl-tag",
+              style: st.keys.metaAds
+                ? { color: "var(--color-primary, #14b8a6)",
+                    borderColor: "color-mix(in srgb, var(--color-primary, #14b8a6) 60%, transparent)",
+                    cursor: "pointer", fontSize: 11.5 }
+                : { cursor: "pointer", fontSize: 11.5 },
+              title: st.keys.metaAds
+                ? "Meta Ads connected — click to update credentials"
+                : "Connect a Meta ads account (token + account + page)",
+              onClick: function () { setShowConnect("metaads"); },
+            }, st.keys.metaAds ? "✓ Meta Ads" : "🔗 Connect Meta Ads"),
+          h("button", { className: "sl-btn", style: { fontSize: 12 },
+              title: "Create the ticked creatives as PAUSED draft ads in " +
+                "Ads Manager — nothing spends until you launch them",
+              onClick: openMetaPublish }, "📣 Publish to Meta (paused)"))),
       pubDone
         ? h("div", { className: "sl-card", style: { display: "flex",
               gap: 10, alignItems: "center" } },
@@ -1846,7 +2468,7 @@
                     setOpen(isOpen ? null : c.id);
                     if (!isOpen) loadContent(c.id);
                   } },
-                c.status === "ready"
+                c.status === "ready" && c.kind === "image-ad"
                   ? h("input", { type: "checkbox",
                       checked: !!sel[c.id],
                       title: "Include in the surge.sh ad pack",
@@ -1889,7 +2511,43 @@
                 ? h("div", { style: { color: "#f59e0b", fontSize: 12,
                     padding: "0 4px" } }, "⚠ " + c.error)
                 : null,
-              c.resultUrl
+              c.kind === "pipeline" && c.steps
+                ? h("div", { style: { marginTop: 8 } },
+                    c.steps.map(function (sp) {
+                      return h("div", { key: sp.id,
+                          className: "sl-copytake",
+                          style: { fontSize: 11.5 } },
+                        h("span", { className: "sl-note",
+                            style: { flexShrink: 0 } },
+                          sp.state === "done" ? "✓" : "◐"),
+                        h("span", { style: { flex: 1 } }, sp.id),
+                        sp.url
+                          ? h("a", { className: "sl-link", href: sp.url,
+                              target: "_blank", rel: "noreferrer" }, "view")
+                          : null);
+                    }),
+                    c.status === "ready" && c.steps.some(function (sp) {
+                      return sp.state === "done" && sp.url;
+                    }) && c.title.indexOf("Character sheet") < 0
+                      ? h("button", { className: "sl-btn",
+                          style: { fontSize: 12, marginTop: 6 },
+                          title: "Seedance image-to-video on every " +
+                            "finished beat — one clip per beat",
+                          onClick: function () {
+                            postJSON("/advanced/animate", { id: c.id })
+                              .then(function (r) { props.onState(r.state); })
+                              .catch(function (e) {
+                                setErr(String((e && e.message) || e));
+                              });
+                          } }, "🎞 Animate beats (Seedance)")
+                      : null)
+                : null,
+              c.resultUrl && c.kind === "video-ad"
+                ? h("video", { className: "sl-result-img",
+                    style: { maxWidth: 460, width: "100%", marginTop: 10 },
+                    src: c.resultUrl, controls: true, preload: "metadata" })
+                : null,
+              c.resultUrl && c.kind !== "video-ad" && c.kind !== "pipeline"
                 ? h("div", { style: { display: "flex", gap: 14,
                       flexWrap: "wrap", alignItems: "flex-start",
                       marginTop: 10 } },

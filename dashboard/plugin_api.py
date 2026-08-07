@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import importlib
+import os
 import importlib.util
 import sys
 import threading
@@ -50,6 +51,9 @@ meta_ads = importlib.import_module(f"{_PKG}.meta_ads")
 kie = importlib.import_module(f"{_PKG}.kie")
 imagegen = importlib.import_module(f"{_PKG}.imagegen")
 surge = importlib.import_module(f"{_PKG}.surge")
+references = importlib.import_module(f"{_PKG}.references")
+recipes = importlib.import_module(f"{_PKG}.recipes")
+meta_publish = importlib.import_module(f"{_PKG}.meta_publish")
 sync_job = importlib.import_module(f"{_PKG}.sync_job")
 analysis = importlib.import_module(f"{_PKG}.analysis")
 
@@ -117,6 +121,10 @@ def _public_state() -> dict:
             "pattern": (c.get("source") or {}).get("pattern", ""),
             "copyTakes": (c.get("source") or {}).get("copyTakes", []),
             "postCopy": (c.get("source") or {}).get("postCopy", []),
+            "steps": [{"id": st_.get("id"), "state": st_.get("state"),
+                       "url": st_.get("url", "")}
+                      for st_ in ((c.get("source") or {}).get("steps")
+                                  or [])][:12],
         })
     return {
         "channels": store.list_channels(),
@@ -134,9 +142,12 @@ def _public_state() -> dict:
             "kie": _has_key("KIE_API_KEY"),
             "imgbb": _has_key("IMGBB_API_KEY"),
             "surge": surge.is_connected(),
+            "metaAds": meta_publish.is_connected(),
         },
         "adsSource": meta_ads.get_ads_source(),
         "surgeEmail": surge.default_email(),
+        "videoTemplates": (store.kv_get("videoTemplates") or [])[:12],
+        "metaPublished": (store.kv_get("metaPublished") or [])[:10],
         "autoSync": sync_job.is_enabled(),
         "adlabJob": _sync_state("adlabJobState"),
         "imageBackend": {
@@ -252,7 +263,8 @@ def adlab_surge_pages():
 class ConnectBody(BaseModel):
     env: str = "META_ACCESS_TOKEN"
     key: str = ""
-    login: str = ""      # surge only: the account email
+    login: str = ""      # surge: account email · metaads: ad account id
+    extra: str = ""      # metaads: the Facebook Page id
 
 
 @router.post("/connect")
@@ -286,6 +298,22 @@ def connect(body: ConnectBody):
             raise HTTPException(
                 status_code=400,
                 detail=f"imgBB rejected the key: {check.get('error')}")
+    elif body.env == "META_AD_ACCOUNT_ID":
+        # Meta ADS connect: key=token, login=ad account id, extra=page id.
+        acct = (body.login or "").strip()
+        page = (body.extra or "").strip()
+        if not acct or not page:
+            raise HTTPException(status_code=400,
+                                detail="ad account id and page id are "
+                                       "both required")
+        check = meta_publish.validate_account(key, acct)
+        if not check.get("ok"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Meta rejected the setup: {check.get('error')}")
+        meta_ads.store_key("META_ACCESS_TOKEN", key)
+        meta_ads.store_key("META_PAGE_ID", page)
+        key = acct           # stored under META_AD_ACCOUNT_ID below
     elif body.env == "SURGE_TOKEN":
         login = (body.login or "").strip()
         if login:
@@ -688,6 +716,323 @@ def adlab_iterate(body: IterateBody):
     return {"ok": True, "creationId": first_cid, "state": _public_state()}
 
 
+# ---------------------------------------------------------------------------
+# Advanced studio — references, recipes, pipelines, templates, log
+# ---------------------------------------------------------------------------
+
+@router.get("/advanced/state")
+def advanced_state():
+    hs = imagegen.hermes_status()
+    return {
+        "recipes": recipes.catalog(),
+        "models": {k: {kk: vv for kk, vv in v.items()}
+                   for k, v in kie.MODELS.items()},
+        "references": references.tree(),
+        "referencesImport": store.kv_get("referencesImport"),
+        "videoTemplates": store.kv_get("videoTemplates") or [],
+        "log": kie.recent_log(30),
+        "capabilities": {
+            "instanceModel": hs,
+            "instanceVideo": False,     # grok/FAL image tools: images only
+            "kie": bool((os.environ.get("KIE_API_KEY") or "").strip()),
+            "videoNote": "Video and sound generation run on KIE only — "
+                         "the instance image model cannot produce them.",
+        },
+    }
+
+
+@router.get("/reference/{path:path}")
+def reference_get(path: str):
+    try:
+        p = references.path_for(path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not p.is_file():
+        raise HTTPException(status_code=404, detail="reference not found")
+    import mimetypes as _mt
+    media = _mt.guess_type(p.name)[0] or "application/octet-stream"
+    try:
+        from fastapi.responses import FileResponse
+        return FileResponse(str(p), media_type=media)
+    except Exception:  # noqa: BLE001
+        return {"ok": True, "bytes": p.stat().st_size}
+
+
+class ReferenceUploadBody(BaseModel):
+    folder: str = "products"
+    filename: str = "image.jpg"
+    dataBase64: str = ""
+
+
+@router.post("/reference/upload")
+def reference_upload(body: ReferenceUploadBody):
+    import base64 as _b64
+    try:
+        payload = _b64.b64decode(body.dataBase64 or "", validate=True)
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="bad base64 payload")
+    try:
+        rel = references.save(body.folder, body.filename, payload)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, "path": rel, "references": references.tree()}
+
+
+class ReferenceDeleteBody(BaseModel):
+    path: str = ""
+
+
+@router.post("/reference/delete")
+def reference_delete(body: ReferenceDeleteBody):
+    try:
+        references.delete(body.path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, "references": references.tree()}
+
+
+@router.post("/reference/import-starter")
+def reference_import_starter():
+    out = references.import_starter_pack()
+    return {"ok": True, **out, "references": references.tree()}
+
+
+def _host_reference(rel: str) -> str:
+    """A library file -> public URL for KIE (via the imgBB pipeline)."""
+    p = references.path_for(rel)
+    if not p.is_file():
+        raise HTTPException(status_code=404, detail=f"reference {rel} missing")
+    aid = kie.save_asset(p.name, p.read_bytes())
+    return kie.host_asset(aid)
+
+
+class RecipeStartBody(BaseModel):
+    recipe: str = ""
+    brief: str = ""
+    model: str = ""
+    aspectRatio: str = "9:16"
+    duration: int = 0
+    veoMode: str = ""
+    variants: int = 1
+    extra: str = ""
+    refPaths: list = []        # reference-library paths
+    refUrls: list = []         # already-public URLs
+
+
+@router.post("/advanced/recipe/start")
+def advanced_recipe_start(body: RecipeStartBody):
+    try:
+        r = recipes.recipe((body.recipe or "").strip())
+    except RuntimeError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    kie_ready = bool((os.environ.get("KIE_API_KEY") or "").strip())
+    refs = [u for u in (body.refUrls or []) if isinstance(u, str) and u]
+    backend = imagegen.get_backend()
+    # image recipes on the instance backend take library refs as data URIs
+    # (no hosting); KIE paths (video, pipelines, kie backend) need public
+    # URLs via the imgBB pipeline
+    needs_hosting = (r["media"] == "video" or r["kind"] == "pipeline"
+                     or backend == "kie")
+    try:
+        for rel in (body.refPaths or [])[:14]:
+            if needs_hosting:
+                refs.append(_host_reference(str(rel)))
+            else:
+                p = references.path_for(str(rel))
+                if not p.is_file():
+                    raise HTTPException(status_code=404,
+                                        detail=f"reference {rel} missing")
+                aid = kie.save_asset(p.name, p.read_bytes())
+                refs.append(imagegen.asset_data_uri(aid))
+
+        if r["media"] == "video":
+            if not kie_ready:
+                raise HTTPException(
+                    status_code=409,
+                    detail="video + sound generation needs KIE — the "
+                           "instance image model does images only. "
+                           "Connect KIE first.")
+            cids = recipes.start_video(
+                r["id"], body.brief, model=body.model,
+                aspect_ratio=body.aspectRatio or "9:16",
+                duration=int(body.duration or 0), ref_urls=refs,
+                veo_mode=body.veoMode or "", variants=body.variants,
+                extra=body.extra or "")
+            return {"ok": True, "creationIds": cids,
+                    "state": _public_state()}
+
+        if r["id"] == "character-sheet":
+            if not kie_ready:
+                raise HTTPException(status_code=409,
+                                    detail="the character-sheet pipeline "
+                                           "runs on KIE — connect it first")
+            cid = recipes.start_character_sheet(
+                (body.extra or body.brief or "influencer")[:60], body.brief)
+            return {"ok": True, "creationIds": [cid],
+                    "state": _public_state()}
+
+        if r["id"] in ("pixar", "claymation"):
+            if not kie_ready:
+                raise HTTPException(status_code=409,
+                                    detail="storyboard pipelines run on "
+                                           "KIE — connect it first")
+            cid = recipes.start_storyboard(r["id"], body.brief,
+                                           beats=int(body.duration or 8),
+                                           ref_urls=refs)
+            return {"ok": True, "creationIds": [cid],
+                    "state": _public_state()}
+
+        # plain image recipes: build prompts from the guide, then ride the
+        # EXISTING backend selection (instance model or KIE)
+        n = max(1, min(10, int(body.variants or 1)))
+        plan = recipes.build_prompts(r["id"], body.brief, n=n,
+                                     extra=body.extra or "")
+        cids = []
+        hermes_jobs = []
+        for i, prompt in enumerate(plan["prompts"][:n]):
+            title = plan["title"] + (f" — take {i + 1}/{n}" if n > 1 else "")
+            task_id = None
+            family = "jobs"
+            if backend == "kie":
+                if r["id"] == "image-ad-template" or \
+                        (body.model or "") == "gpt4o-image":
+                    sub = kie.submit_gpt4o_image(prompt, size="1:1",
+                                                 files_url=refs)
+                else:
+                    sub = kie.submit_jobs_image(
+                        body.model or "nano-banana-2", prompt,
+                        aspect_ratio=body.aspectRatio or "1:1",
+                        image_input=refs)
+                task_id, family = sub["taskId"], sub["family"]
+            cid = store.create_creation(
+                "image-ad", title, body.brief,
+                f"# {title}\n\n**Recipe:** {r['name']}\n\n"
+                f"**Notes:** {plan['notes']}\n\n"
+                f"## Generation prompt\n\n{prompt}",
+                status="generating",
+                source={"recipe": r["id"], "prompt": prompt[:4000],
+                        "family": family, "backend": backend,
+                        "retries": 0})
+            if task_id:
+                store.update_creation(cid, task_id=task_id)
+            else:
+                hermes_jobs.append((cid, prompt, None,
+                                    refs[:3], ""))
+            cids.append(cid)
+        if hermes_jobs:
+            _hermes_batch(hermes_jobs)
+        return {"ok": True, "creationIds": cids, "state": _public_state()}
+    except HTTPException:
+        raise
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=str(exc)[:300])
+
+
+class AnalyzeVideoBody(BaseModel):
+    url: str = ""
+    description: str = ""
+    recipe: str = "analyze-video"
+
+
+@router.post("/advanced/analyze-video")
+def advanced_analyze_video(body: AnalyzeVideoBody):
+    if not (body.url or "").strip() and not (body.description or "").strip():
+        raise HTTPException(status_code=400,
+                            detail="give the video URL and describe it")
+    try:
+        tpl = recipes.analyze_video(
+            (body.url or "").strip(), body.description or "",
+            recipe_id=("clone-ad" if body.recipe == "clone-ad"
+                       else "analyze-video"))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=str(exc)[:300])
+    return {"ok": True, "template": tpl, "state": _public_state()}
+
+
+class AnimateBody(BaseModel):
+    id: int = 0
+    model: str = "bytedance/seedance-2"
+
+
+@router.post("/advanced/animate")
+def advanced_animate(body: AnimateBody):
+    if not (os.environ.get("KIE_API_KEY") or "").strip():
+        raise HTTPException(status_code=409,
+                            detail="animating beats runs on KIE — "
+                                   "connect it first")
+    try:
+        made = recipes.animate_storyboard(body.id, model=body.model)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return {"ok": True, "clips": made, "state": _public_state()}
+
+
+@router.get("/adlab/meta/adsets")
+def meta_adsets():
+    try:
+        return {"ok": True, "adsets": meta_publish.list_adsets()}
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=str(exc)[:300])
+
+
+class MetaPublishBody(BaseModel):
+    ids: list = []
+    adsetId: str = ""
+    link: str = ""
+    cta: str = "LEARN_MORE"
+
+
+@router.post("/adlab/meta/publish")
+def meta_publish_route(body: MetaPublishBody):
+    """Publish selected creatives as PAUSED Meta ads (draft in Ads
+    Manager) — the kit's deploy path, one ad per creation."""
+    if not (body.adsetId or "").strip():
+        raise HTTPException(status_code=400,
+                            detail="pick the target ad set")
+    if not (body.link or "").strip().startswith("http"):
+        raise HTTPException(status_code=400,
+                            detail="the ad needs a destination link (https)")
+    published, errors = [], []
+    for cid in (body.ids or [])[:10]:
+        c = store.get_creation(int(cid))
+        if not c or c.get("status") != "ready" or not c.get("result_url"):
+            errors.append(f"creation {cid}: not ready")
+            continue
+        try:
+            payload = _creation_image_bytes(c["result_url"])
+            entry = meta_publish.publish_creation(
+                c, body.adsetId.strip(), body.link.strip(),
+                cta=(body.cta or "LEARN_MORE").strip(),
+                image_bytes=payload)
+            published.append(entry)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"creation {cid}: {str(exc)[:150]}")
+    if not published:
+        raise HTTPException(status_code=502,
+                            detail="; ".join(errors)[:300] or "nothing published")
+    return {"ok": True, "published": published, "errors": errors,
+            "state": _public_state()}
+
+
+def _creation_image_bytes(result_url: str) -> bytes:
+    import re as _re
+    import requests as _rq
+    m = _re.match(r"^/api/plugins/shorts-lab/asset/([A-Za-z0-9_.-]+)$",
+                  result_url or "")
+    if m:
+        p = store.assets_dir() / m.group(1)
+        if not p.exists():
+            raise RuntimeError("asset file missing")
+        return p.read_bytes()
+    r = _rq.get(result_url, timeout=120)
+    r.raise_for_status()
+    return r.content
+
+
 class CreationBody(BaseModel):
     id: int = 0
 
@@ -698,8 +1043,10 @@ def creations_check(body: CreationBody):
     if not c:
         raise HTTPException(status_code=404, detail="creation not found")
     if c["status"] == "generating" and c.get("task_id"):
+        fam = (c.get("source") or {}).get("family") or "jobs"
         try:
-            tick = kie.check_task(c["task_id"])
+            tick = kie.check_any(c["task_id"], fam) if fam != "jobs" \
+                else kie.check_task(c["task_id"])
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=502, detail=str(exc)[:200])
         if tick["state"] == "success":

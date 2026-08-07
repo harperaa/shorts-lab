@@ -295,3 +295,313 @@ def validate_imgbb_key(key: str) -> dict:
         return {"ok": False, "error": f"HTTP {exc.code}: {detail}"}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": str(exc)[:150]}
+
+
+# ---------------------------------------------------------------------------
+# Full model catalog — capabilities drive the Advanced studio UI and the
+# backend gating (the instance's grok image model does IMAGES ONLY; every
+# video/audio job below requires KIE). Contract per model verified against
+# the ad-builder kit's reference.md (docs.kie.ai; marketplace strings
+# evolve — surface errors verbatim so drift is visible).
+# ---------------------------------------------------------------------------
+
+MODELS = {
+    # -- video: unified jobs endpoint --------------------------------------
+    "bytedance/seedance-2": {
+        "label": "Seedance 2.0", "type": "video", "family": "jobs",
+        "audio": True, "durations": list(range(4, 16)),
+        "ratios": ["16:9", "9:16", "1:1"], "i2v": True,
+        "note": "Flagship: UGC, reveal, hero, lookbook, walkthrough. "
+                "Native audio."},
+    "bytedance/seedance-2-fast": {
+        "label": "Seedance 2.0 Fast", "type": "video", "family": "jobs",
+        "audio": True, "durations": list(range(4, 16)),
+        "ratios": ["16:9", "9:16", "1:1"], "i2v": True,
+        "note": "Cheaper/faster Seedance for iteration."},
+    "bytedance/seedance-1.5-pro": {
+        "label": "Seedance 1.5 Pro", "type": "video", "family": "jobs",
+        "audio": True, "durations": list(range(4, 13)),
+        "ratios": ["16:9", "9:16", "1:1"], "i2v": True,
+        "note": "Legacy Seedance Pro."},
+    "sora-2-text-to-video": {
+        "label": "Sora 2", "type": "video", "family": "jobs",
+        "audio": True, "durations": [4, 8, 12, 16, 20],
+        "ratios": ["16:9", "9:16"], "i2v": False,
+        "note": "Long-duration text-to-video (up to 20s)."},
+    "sora-2-pro-text-to-video": {
+        "label": "Sora 2 Pro", "type": "video", "family": "jobs",
+        "audio": True, "durations": [4, 8, 12, 16, 20],
+        "ratios": ["16:9", "9:16"], "i2v": False,
+        "note": "Premium tier for hero pieces."},
+    "sora-2-image-to-video": {
+        "label": "Sora 2 image-to-video", "type": "video", "family": "jobs",
+        "audio": True, "durations": [4, 8, 12, 16, 20],
+        "ratios": ["16:9", "9:16"], "i2v": True,
+        "note": "Start a Sora video from a hosted image URL."},
+    "kling-3": {
+        "label": "Kling 3.0", "type": "video", "family": "jobs",
+        "audio": False, "durations": [5, 10],
+        "ratios": ["16:9", "9:16", "1:1"], "i2v": True,
+        "note": "Cinematic b-roll / scene clips (no dialogue track)."},
+    # -- video: dedicated Veo endpoint -------------------------------------
+    "veo3_fast": {
+        "label": "Veo 3.1 Fast", "type": "video", "family": "veo",
+        "audio": True, "durations": [8],
+        "ratios": ["16:9", "9:16"], "i2v": True,
+        "note": "The ONLY Veo model that supports REFERENCE_2_VIDEO."},
+    "veo3": {
+        "label": "Veo 3.1", "type": "video", "family": "veo",
+        "audio": True, "durations": [8],
+        "ratios": ["16:9", "9:16"], "i2v": False,
+        "note": "TEXT_2_VIDEO and first+last-frame transitions."},
+    "veo3_lite": {
+        "label": "Veo 3.1 Lite", "type": "video", "family": "veo",
+        "audio": True, "durations": [8],
+        "ratios": ["16:9", "9:16"], "i2v": False,
+        "note": "Budget Veo tier."},
+    # -- image: unified jobs endpoint --------------------------------------
+    "nano-banana-2": {
+        "label": "Nano Banana 2", "type": "image", "family": "jobs",
+        "audio": False, "refs_max": 14,
+        "ratios": ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4",
+                   "9:16", "16:9", "21:9", "auto"],
+        "note": "Default image model: UGC stills, character sheets, "
+                "product shots."},
+    "nano-banana-pro": {
+        "label": "Nano Banana Pro", "type": "image", "family": "jobs",
+        "audio": False, "refs_max": 14,
+        "ratios": ["1:1", "2:3", "3:2", "4:5", "9:16", "16:9", "auto"],
+        "note": "Gemini 3 Pro Image — locks character identity tighter."},
+    "google/nano-banana-edit": {
+        "label": "Nano Banana Edit", "type": "image", "family": "jobs",
+        "audio": False, "refs_max": 14,
+        "ratios": ["auto", "1:1", "9:16", "16:9"],
+        "note": "Inpaint / edit an existing image (image_urls)."},
+    # -- image: dedicated gpt4o endpoint -----------------------------------
+    "gpt4o-image": {
+        "label": "ChatGPT Image 2", "type": "image", "family": "gpt4o",
+        "audio": False, "refs_max": 5,
+        "ratios": ["1:1", "3:2", "2:3"],
+        "note": "Typography / UI-mimicry creatives; Pixar + claymation "
+                "storyboards."},
+}
+
+VEO_MODES = ("TEXT_2_VIDEO", "REFERENCE_2_VIDEO",
+             "FIRST_AND_LAST_FRAMES_2_VIDEO")
+
+
+def model_info(model: str) -> dict:
+    m = MODELS.get(model)
+    if not m:
+        raise RuntimeError(f"unknown KIE model: {model}")
+    return m
+
+
+def _log_call(model: str, task_id: str, kind: str, extra: dict = None):
+    """Append-only generation log (kit convention: model + task + timing,
+    NEVER prompts or keys). Powers the Advanced panel's log section."""
+    try:
+        row = {"at": time.time(), "model": model, "taskId": task_id,
+               "kind": kind}
+        if extra:
+            row.update(extra)
+        log = store.data_dir() / "kie-api.jsonl"
+        with open(log, "a") as fh:
+            fh.write(json.dumps(row) + "\n")
+    except Exception:  # noqa: BLE001 — logging must never break a job
+        pass
+
+
+def recent_log(limit: int = 40) -> list:
+    try:
+        lines = (store.data_dir() / "kie-api.jsonl").read_text().splitlines()
+    except OSError:
+        return []
+    out = []
+    for ln in lines[-limit:]:
+        try:
+            out.append(json.loads(ln))
+        except ValueError:
+            continue
+    return list(reversed(out))
+
+
+def _post_with_backoff(url: str, body: dict, timeout: int = 60) -> dict:
+    """POST with the kit's 429 discipline (20 req / 10s account limit)."""
+    for attempt in range(3):
+        try:
+            return _post_json(url, body, timeout=timeout)
+        except RuntimeError as exc:
+            if "429" in str(exc) and attempt < 2:
+                time.sleep(4 + attempt * 5)
+                continue
+            raise
+    raise RuntimeError("KIE rate limit persisted")
+
+
+def _task_id_from(resp: dict) -> str:
+    data = resp.get("data") or {}
+    task_id = data.get("taskId") or resp.get("taskId")
+    code = resp.get("code")
+    if code is not None and code != 200:
+        raise RuntimeError(f"KIE submit code={code}: "
+                           f"{resp.get('msg') or resp}")
+    if not task_id:
+        raise RuntimeError(f"KIE submit returned no taskId: {resp}")
+    return task_id
+
+
+def submit_video(model: str, prompt: str, aspect_ratio: str = "9:16",
+                 duration: Optional[int] = None,
+                 image_urls: Optional[list] = None,
+                 veo_mode: str = "") -> dict:
+    """Create a video task on any catalog model. Returns
+    {taskId, family} — the family picks the poll endpoint."""
+    info = model_info(model)
+    if info["type"] != "video":
+        raise RuntimeError(f"{model} is not a video model")
+    refs = [u for u in (image_urls or []) if u]
+
+    if info["family"] == "veo":
+        mode = (veo_mode or "").strip() or (
+            "REFERENCE_2_VIDEO" if len(refs) == 1 else
+            "FIRST_AND_LAST_FRAMES_2_VIDEO" if len(refs) == 2 else
+            "TEXT_2_VIDEO")
+        if mode not in VEO_MODES:
+            raise RuntimeError(f"veo mode must be one of {VEO_MODES}")
+        if mode == "REFERENCE_2_VIDEO":
+            if model != "veo3_fast":
+                raise RuntimeError(
+                    "REFERENCE_2_VIDEO only supports veo3_fast")
+            if len(refs) != 1:
+                raise RuntimeError("REFERENCE_2_VIDEO needs exactly 1 "
+                                   "image URL")
+        if mode == "FIRST_AND_LAST_FRAMES_2_VIDEO" and len(refs) != 2:
+            raise RuntimeError("FIRST_AND_LAST_FRAMES_2_VIDEO needs "
+                               "exactly 2 image URLs (start, end)")
+        body = {"prompt": prompt, "model": model, "generationType": mode,
+                "aspect_ratio": aspect_ratio or "16:9",
+                "enableTranslation": True}
+        if refs and mode != "TEXT_2_VIDEO":
+            body["imageUrls"] = refs
+        resp = _post_with_backoff(f"{BASE_URL}/api/v1/veo/generate", body)
+        task_id = _task_id_from(resp)
+        _log_call(model, task_id, "video", {"mode": mode})
+        return {"taskId": task_id, "family": "veo"}
+
+    inputs: dict = {"prompt": prompt,
+                    "aspect_ratio": aspect_ratio or "9:16"}
+    if duration:
+        durs = info.get("durations") or []
+        if durs and duration not in durs:
+            duration = min(durs, key=lambda d: abs(d - duration))
+        inputs["duration"] = duration
+    if refs:
+        if not info.get("i2v"):
+            raise RuntimeError(f"{info['label']} is text-to-video only — "
+                               "drop the reference image or switch model")
+        inputs["image_urls"] = refs
+    resp = _post_with_backoff(f"{BASE_URL}/api/v1/jobs/createTask",
+                              {"model": model, "input": inputs})
+    task_id = _task_id_from(resp)
+    _log_call(model, task_id, "video", {"duration": duration})
+    return {"taskId": task_id, "family": "jobs"}
+
+
+def submit_gpt4o_image(prompt: str, size: str = "1:1",
+                       files_url: Optional[list] = None) -> dict:
+    """ChatGPT Image 2 via the dedicated /gpt4o-image endpoint (the kit's
+    typography/UI-mimicry + storyboard generator). Up to 5 reference URLs."""
+    if size not in ("1:1", "3:2", "2:3"):
+        raise RuntimeError("gpt4o-image sizes are 1:1, 3:2, 2:3")
+    body = {"prompt": prompt + NO_CHROME_SUFFIX + GLYPH_SUFFIX,
+            "size": size}
+    refs = [u for u in (files_url or []) if u][:5]
+    if refs:
+        body["filesUrl"] = refs
+    resp = _post_with_backoff(f"{BASE_URL}/api/v1/gpt4o-image/generate",
+                              body)
+    task_id = _task_id_from(resp)
+    _log_call("gpt4o-image", task_id, "image")
+    return {"taskId": task_id, "family": "gpt4o"}
+
+
+def submit_jobs_image(model: str, prompt: str, aspect_ratio: str = "1:1",
+                      image_input: Optional[list] = None,
+                      resolution: str = "1K") -> dict:
+    """Catalog image models on the jobs endpoint (nano-banana family) with
+    the full reference set (up to 14 URLs)."""
+    info = model_info(model)
+    if info["type"] != "image" or info["family"] != "jobs":
+        raise RuntimeError(f"{model} is not a jobs-endpoint image model")
+    refs = [u for u in (image_input or []) if u][:info.get("refs_max", 14)]
+    inputs = {"prompt": prompt + NO_CHROME_SUFFIX + GLYPH_SUFFIX,
+              "aspect_ratio": aspect_ratio or "auto",
+              "resolution": resolution, "output_format": "png"}
+    if refs:
+        key = "image_urls" if model == "google/nano-banana-edit" \
+            else "image_input"
+        inputs[key] = refs
+    resp = _post_with_backoff(f"{BASE_URL}/api/v1/jobs/createTask",
+                              {"model": model, "input": inputs})
+    task_id = _task_id_from(resp)
+    _log_call(model, task_id, "image")
+    return {"taskId": task_id, "family": "jobs"}
+
+
+def check_any(task_id: str, family: str = "jobs") -> dict:
+    """Poll any task family. Returns {state, url?, urls?, error?} with
+    state normalized to waiting|generating|success|fail."""
+    if family == "jobs":
+        return check_task(task_id)
+    if family == "veo":
+        resp = _get_json(f"{BASE_URL}/api/v1/veo/record-info"
+                         f"?taskId={task_id}")
+        data = resp.get("data") or {}
+        flag = data.get("successFlag")
+        if flag == 1:
+            urls = ((data.get("response") or {}).get("resultUrls")) or []
+            if not urls:
+                return {"state": "fail", "error": "veo success but no URLs"}
+            return {"state": "success", "url": urls[0], "urls": urls}
+        if flag in (2, 3):
+            return {"state": "fail",
+                    "error": str(data.get("errorMessage")
+                                 or "veo generation failed")[:300]}
+        return {"state": "generating"}
+    if family == "gpt4o":
+        resp = _get_json(f"{BASE_URL}/api/v1/gpt4o-image/record-info"
+                         f"?taskId={task_id}")
+        data = resp.get("data") or {}
+        flag = data.get("successFlag")
+        if flag == 1:
+            info = data.get("response") or data
+            urls = (info.get("resultUrls") or info.get("result_urls")
+                    or info.get("urls") or [])
+            if isinstance(urls, str):
+                try:
+                    urls = json.loads(urls)
+                except ValueError:
+                    urls = [urls]
+            if not urls:
+                return {"state": "fail",
+                        "error": "gpt4o success but no URLs"}
+            return {"state": "success", "url": urls[0], "urls": urls}
+        if flag in (2, 3):
+            return {"state": "fail",
+                    "error": str(data.get("errorMessage")
+                                 or "gpt4o generation failed")[:300]}
+        return {"state": "generating"}
+    raise RuntimeError(f"unknown task family: {family}")
+
+
+def refresh_download_url(temp_url: str) -> str:
+    """KIE temp files (~24h) — mint a fresh link when one expires."""
+    resp = _post_json(f"{BASE_URL}/api/v1/common/download-url",
+                      {"url": temp_url})
+    data = resp.get("data")
+    if isinstance(data, str) and data.startswith("http"):
+        return data
+    if isinstance(data, dict) and data.get("url"):
+        return data["url"]
+    raise RuntimeError(f"download-url refresh failed: {str(resp)[:150]}")
