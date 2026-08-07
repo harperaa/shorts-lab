@@ -286,6 +286,22 @@ def start_video(recipe_id: str, brief: str, model: str = "",
 # Pipelines
 # ---------------------------------------------------------------------------
 
+def _public_ref(url: str) -> str:
+    """KIE's own CDN links (tempfile.aiquickdraw.com) are silently
+    IGNORED when passed back as generation references — live-observed:
+    seedance i2v fell back to text-to-video and produced random people.
+    Re-host such results on imgBB before using them as refs."""
+    if "tempfile.aiquickdraw.com" not in (url or ""):
+        return url
+    import urllib.request as _ur
+    req = _ur.Request(url, headers={"User-Agent":
+                                    "Mozilla/5.0 (shorts-lab)"})
+    payload = _ur.urlopen(req, timeout=120).read()
+    ext = ".png" if ".png" in url else ".jpg"
+    aid = kie.save_asset("ref" + ext, payload)
+    return kie.host_asset(aid)
+
+
 def _poll_until(task_id: str, family: str, timeout_s: int = 2400) -> str:
     """Server-side poll (kit cadence ~30s; we use 15s) until success.
     Returns the result URL or raises."""
@@ -347,7 +363,7 @@ def start_character_sheet(name: str, description: str) -> int:
                     prompt = (f"{hero_prompt}\n\nSame exact person as the "
                               f"reference image — identical face, hair, "
                               f"and identity. New shot: {angle_desc}.")
-                    refs = [hero_url]
+                    refs = [_public_ref(hero_url)]
                 sub = kie.submit_jobs_image("nano-banana-2", prompt,
                                             aspect_ratio="2:3",
                                             image_input=refs)
@@ -404,7 +420,7 @@ def start_storyboard(recipe_id: str, brief: str, beats: int = 8,
             for i, step in enumerate(steps):
                 refs = list(base_refs)
                 if prev_url:
-                    refs = [prev_url] + refs
+                    refs = [_public_ref(prev_url)] + refs
                 sub = kie.submit_gpt4o_image(
                     step["prompt"]
                     + ("\nSame characters and art style as the reference "
@@ -447,7 +463,8 @@ def animate_storyboard(creation_id: int,
                   "Subtle camera move, natural secondary motion, keep "
                   "characters and style identical to the frame.")
         sub = kie.submit_video(model, motion, aspect_ratio="16:9",
-                               duration=5, image_urls=[step["url"]])
+                               duration=5,
+                               image_urls=[_public_ref(step["url"])])
         vcid = store.create_creation(
             "video-ad", f"{c['title']} — beat {i + 1} clip",
             c.get("brief") or "",

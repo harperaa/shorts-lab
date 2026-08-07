@@ -564,3 +564,22 @@ def test_build_prompts_uses_template_override(home, monkeypatch):
     recipes.build_prompts("image-ad-template", "my offer",
                           guide_override="THE ONLY TEMPLATE TEXT T7")
     assert "THE ONLY TEMPLATE TEXT T7" in _fake_llm.last["input"][0]["text"]
+
+
+def test_kie_cdn_refs_rehosted_for_generation(home, monkeypatch):
+    """tempfile.aiquickdraw.com URLs are ignored as generation refs
+    (live-observed t2v fallback) — they must re-host via imgBB first."""
+    monkeypatch.setattr(recipes, "kie", kie)
+    import urllib.request as ur
+    monkeypatch.setattr(ur, "urlopen",
+                        lambda req, timeout=120: __import__("io").BytesIO(
+                            b"\xff\xd8\xffimg"))
+    monkeypatch.setattr(kie, "save_asset", lambda n, p: "aid.jpg")
+    monkeypatch.setattr(kie, "host_asset",
+                        lambda a: "https://i.ibb.co/hosted.jpg")
+    out = recipes._public_ref(
+        "https://tempfile.aiquickdraw.com/workers/images/x.jpg")
+    assert out == "https://i.ibb.co/hosted.jpg"
+    # non-KIE-CDN URLs pass through untouched
+    assert recipes._public_ref("https://i.ibb.co/y.jpg") == \
+        "https://i.ibb.co/y.jpg"
