@@ -756,3 +756,32 @@ def creation_detail(cid: int):
     if not c:
         raise HTTPException(status_code=404, detail="creation not found")
     return c
+
+
+# ---------------------------------------------------------------------------
+# Accomplishments — read by the acvc /accomplishments aggregator and shown
+# on the hermes Achievements page. Full credit when every item is done.
+# ---------------------------------------------------------------------------
+
+ACHIEVEMENT = {
+    "id": "short-form-operator",
+    "name": "Short Form Operator",
+    "icon": "⚡",
+    "description": "Run the Short Form engine: watch the winners, "
+                   "then ship your own creatives.",
+}
+
+
+def achievements_progress() -> dict:
+    items = [
+        {"id": "channel", "label": "Monitor a competitor shorts channel",
+         "done": bool(store.list_channels())},
+        {"id": "shorts", "label": "Pull their recent shorts",
+         "done": bool(store.list_shorts(3650))},
+        {"id": "adspage", "label": "Monitor an ad page on Ads Research",
+         "done": bool(store.list_ad_pages())},
+        {"id": "creative", "label": "Generate your first creative in the Lab",
+         "done": any(c.get("status") == "ready"
+                     for c in store.list_creations())},
+    ]
+    return {"items": items, "complete": all(i["done"] for i in items)}

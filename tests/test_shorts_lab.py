@@ -1039,3 +1039,31 @@ def test_download_filename_is_safe(home):
     assert surge._safe_filename('a/b\\c:d*e?"f"<g>|h', "png") == \
         "a-b-c-d-e--f--g--h.png"
     assert surge._safe_filename("", "png") == "ad.png"
+
+
+# ---------------------------------------------------------------------------
+# accomplishments export (read by the acvc aggregator)
+# ---------------------------------------------------------------------------
+
+def test_achievements_progress_tracks_real_state(home, monkeypatch):
+    import importlib.util as _iu
+    name = "sl_api_ach_test"
+    spec = _iu.spec_from_file_location(
+        name, ROOT / "dashboard" / "plugin_api.py")
+    mod = _iu.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+
+    assert mod.ACHIEVEMENT["id"] == "short-form-operator"
+    out = mod.achievements_progress()
+    assert out["complete"] is False
+    assert [i["done"] for i in out["items"]] == [False, False, False, False]
+
+    store.add_channel("@c")
+    store.upsert_short("v1", "@c", "t", "l", None, 30.0, 10, "", "tr")
+    store.add_ad_page("77", "Acme")
+    cid = store.create_creation("image-ad", "Ad", "b", "c", status="ready",
+                                source={})
+    store.update_creation(cid, status="ready", result_url="https://x/y.png")
+    out = mod.achievements_progress()
+    assert out["complete"] is True
