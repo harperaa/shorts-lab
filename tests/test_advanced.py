@@ -132,7 +132,7 @@ def test_starter_pack_import_maps_repo_paths(home, monkeypatch):
 
 def test_model_catalog_capabilities():
     assert kie.model_info("bytedance/seedance-2")["audio"] is True
-    assert kie.model_info("kling-3")["audio"] is False
+    assert kie.model_info("kling-2.6/text-to-video")["kling"] is True
     assert kie.model_info("gpt4o-image")["family"] == "gpt4o"
     assert kie.model_info("veo3_fast")["family"] == "veo"
     with pytest.raises(RuntimeError):
@@ -249,9 +249,9 @@ def test_generation_log_written(home, monkeypatch):
     monkeypatch.setattr(kie, "_post_json",
                         lambda url, body, timeout=60:
                         {"code": 200, "data": {"taskId": "t9"}})
-    kie.submit_video("kling-3", "b-roll", duration=5)
+    kie.submit_video("kling-2.6/text-to-video", "b-roll", duration=5)
     rows = kie.recent_log()
-    assert rows and rows[0]["model"] == "kling-3"
+    assert rows and rows[0]["model"] == "kling-2.6/text-to-video"
     assert "prompt" not in rows[0]           # kit rule: never log prompts
 
 
@@ -472,3 +472,28 @@ def test_meta_validate_account(home, monkeypatch):
                         lambda url, params=None, timeout=None:
                         _Resp(200, {"error": {"message": "bad token"}}))
     assert meta_publish.validate_account("tok", "123")["ok"] is False
+
+
+def test_kling_input_quirks(home, monkeypatch):
+    """Verified against docs.kie.ai/market/kling/*: STRING duration enum,
+    sound flag, image_urls capped at 1 on the i2v model."""
+    monkeypatch.setenv("KIE_API_KEY", "k")
+    sent = {}
+
+    def fake_post(url, body, timeout=60):
+        sent["body"] = body
+        return {"code": 200, "data": {"taskId": "kl1"}}
+
+    monkeypatch.setattr(kie, "_post_json", fake_post)
+    kie.submit_video("kling-2.6/text-to-video", "b-roll", duration=7,
+                     aspect_ratio="16:9")
+    inp = sent["body"]["input"]
+    assert inp["duration"] == "5"          # snapped + stringified
+    assert inp["sound"] is True
+    assert inp["aspect_ratio"] == "16:9"
+
+    kie.submit_video("kling-2.6/image-to-video", "animate", duration=10,
+                     image_urls=["https://h/a.jpg", "https://h/b.jpg"])
+    inp = sent["body"]["input"]
+    assert inp["image_urls"] == ["https://h/a.jpg"]   # capped at 1
+    assert inp["duration"] == "10"

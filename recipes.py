@@ -92,7 +92,7 @@ CATALOG = [
      "desc": "Animate a still (REFERENCE_2_VIDEO), transition two stills, "
              "or pure text-to-video.", "refs": ["character"]},
     {"id": "kling-broll", "name": "Kling 3.0 b-roll", "emoji": "🎞️",
-     "media": "video", "kind": "video", "model": "kling-3",
+     "media": "video", "kind": "video", "model": "kling-2.6/text-to-video",
      "desc": "Cinematic b-roll and scene clips.", "refs": []},
     # -- pipelines (KIE ONLY) ----------------------------------------------
     {"id": "character-sheet", "name": "New AI influencer (10-angle sheet)",
@@ -282,7 +282,7 @@ def start_video(recipe_id: str, brief: str, model: str = "",
 # Pipelines
 # ---------------------------------------------------------------------------
 
-def _poll_until(task_id: str, family: str, timeout_s: int = 900) -> str:
+def _poll_until(task_id: str, family: str, timeout_s: int = 2400) -> str:
     """Server-side poll (kit cadence ~30s; we use 15s) until success.
     Returns the result URL or raises."""
     waited = 0
@@ -351,7 +351,9 @@ def start_character_sheet(name: str, description: str) -> int:
                 if hero_url is None:
                     hero_url = url
                 import urllib.request as _ur
-                payload = _ur.urlopen(url, timeout=120).read()
+                req = _ur.Request(url, headers={
+                    "User-Agent": "Mozilla/5.0 (shorts-lab)"})
+                payload = _ur.urlopen(req, timeout=120).read()
                 references.save(f"influencers/{slug}",
                                 f"{angle_id}.jpg", payload)
                 steps[i] = {"id": angle_id, "state": "done", "url": url}

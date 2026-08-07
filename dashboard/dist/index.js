@@ -864,7 +864,7 @@
              steps: SurgeSteps,
              ph: "Password (new account or existing) — or a surge token",
              loginPh: "Email — new address creates the account",
-             loginOptional: true },
+             loginOptional: true, prefillLogin: true },
     metaads: { env: "META_AD_ACCOUNT_ID",
                title: "📣 Connect Meta Ads (paused-draft publishing)",
                steps: MetaAdsSteps,
@@ -874,9 +874,11 @@
   };
 
   function ConnectModal(props) {
+    var spec0 = CONNECT_KINDS[props.kind] || CONNECT_KINDS.meta;
     var keySt = useState("");
     var keyVal = keySt[0], setKeyVal = keySt[1];
-    var loginSt = useState(props.defaultLogin || "");
+    var loginSt = useState(
+      spec0.prefillLogin ? (props.defaultLogin || "") : "");
     var loginVal = loginSt[0], setLoginVal = loginSt[1];
     var extraSt = useState("");
     var extraVal = extraSt[0], setExtraVal = extraSt[1];

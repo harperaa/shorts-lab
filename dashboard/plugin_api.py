@@ -845,6 +845,17 @@ def advanced_recipe_start(body: RecipeStartBody):
                 aid = kie.save_asset(p.name, p.read_bytes())
                 refs.append(imagegen.asset_data_uri(aid))
 
+        if r["id"] in ("pixar", "claymation"):
+            if not kie_ready:
+                raise HTTPException(status_code=409,
+                                    detail="storyboard pipelines run on "
+                                           "KIE — connect it first")
+            cid = recipes.start_storyboard(r["id"], body.brief,
+                                           beats=int(body.duration or 8),
+                                           ref_urls=refs)
+            return {"ok": True, "creationIds": [cid],
+                    "state": _public_state()}
+
         if r["media"] == "video":
             if not kie_ready:
                 raise HTTPException(
@@ -868,17 +879,6 @@ def advanced_recipe_start(body: RecipeStartBody):
                                            "runs on KIE — connect it first")
             cid = recipes.start_character_sheet(
                 (body.extra or body.brief or "influencer")[:60], body.brief)
-            return {"ok": True, "creationIds": [cid],
-                    "state": _public_state()}
-
-        if r["id"] in ("pixar", "claymation"):
-            if not kie_ready:
-                raise HTTPException(status_code=409,
-                                    detail="storyboard pipelines run on "
-                                           "KIE — connect it first")
-            cid = recipes.start_storyboard(r["id"], body.brief,
-                                           beats=int(body.duration or 8),
-                                           ref_urls=refs)
             return {"ok": True, "creationIds": [cid],
                     "state": _public_state()}
 

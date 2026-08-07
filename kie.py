@@ -338,11 +338,21 @@ MODELS = {
         "audio": True, "durations": [4, 8, 12, 16, 20],
         "ratios": ["16:9", "9:16"], "i2v": True,
         "note": "Start a Sora video from a hosted image URL."},
-    "kling-3": {
-        "label": "Kling 3.0", "type": "video", "family": "jobs",
-        "audio": False, "durations": [5, 10],
+    # Kling on KIE: verified marketplace strings 2026-08-07
+    # (docs.kie.ai/market/kling/*) — split t2v/i2v models, STRING duration
+    # ("5"/"10"), and an optional `sound` flag.
+    "kling-2.6/text-to-video": {
+        "label": "Kling 2.6", "type": "video", "family": "jobs",
+        "audio": True, "durations": [5, 10],
+        "ratios": ["16:9", "9:16", "1:1"], "i2v": False,
+        "kling": True,
+        "note": "Cinematic b-roll / scene clips; optional sound track."},
+    "kling-2.6/image-to-video": {
+        "label": "Kling 2.6 image-to-video", "type": "video",
+        "family": "jobs", "audio": True, "durations": [5, 10],
         "ratios": ["16:9", "9:16", "1:1"], "i2v": True,
-        "note": "Cinematic b-roll / scene clips (no dialogue track)."},
+        "kling": True, "refs_max": 1,
+        "note": "Animate one still (max 1 image URL, 10 MB)."},
     # -- video: dedicated Veo endpoint -------------------------------------
     "veo3_fast": {
         "label": "Veo 3.1 Fast", "type": "video", "family": "veo",
@@ -495,12 +505,19 @@ def submit_video(model: str, prompt: str, aspect_ratio: str = "9:16",
         durs = info.get("durations") or []
         if durs and duration not in durs:
             duration = min(durs, key=lambda d: abs(d - duration))
-        inputs["duration"] = duration
+        # kling takes duration as a STRING enum ("5"/"10")
+        inputs["duration"] = str(duration) if info.get("kling") else duration
+    if info.get("kling"):
+        inputs["sound"] = bool(info.get("audio"))
+        inputs.pop("aspect_ratio", None)
+        if aspect_ratio in ("1:1", "16:9", "9:16"):
+            inputs["aspect_ratio"] = aspect_ratio
     if refs:
         if not info.get("i2v"):
             raise RuntimeError(f"{info['label']} is text-to-video only — "
                                "drop the reference image or switch model")
-        inputs["image_urls"] = refs
+        cap = info.get("refs_max")
+        inputs["image_urls"] = refs[:cap] if cap else refs
     resp = _post_with_backoff(f"{BASE_URL}/api/v1/jobs/createTask",
                               {"model": model, "input": inputs})
     task_id = _task_id_from(resp)
