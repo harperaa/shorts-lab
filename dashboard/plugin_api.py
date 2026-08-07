@@ -133,9 +133,10 @@ def _public_state() -> dict:
             "apify": _has_key("APIFY_API_TOKEN"),
             "kie": _has_key("KIE_API_KEY"),
             "imgbb": _has_key("IMGBB_API_KEY"),
+            "surge": surge.is_connected(),
         },
         "adsSource": meta_ads.get_ads_source(),
-        "surge": surge.is_connected(),
+        "surgeEmail": surge.default_email(),
         "autoSync": sync_job.is_enabled(),
         "adlabJob": _sync_state("adlabJobState"),
         "imageBackend": {

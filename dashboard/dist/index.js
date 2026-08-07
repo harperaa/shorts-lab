@@ -793,7 +793,7 @@
   function ConnectModal(props) {
     var keySt = useState("");
     var keyVal = keySt[0], setKeyVal = keySt[1];
-    var loginSt = useState("");
+    var loginSt = useState(props.defaultLogin || "");
     var loginVal = loginSt[0], setLoginVal = loginSt[1];
     var busySt = useState(false);
     var busy = busySt[0], setBusy = busySt[1];
@@ -1514,6 +1514,7 @@
     return h("div", null,
       showConnect
         ? h(ConnectModal, { kind: showConnect, onState: props.onState,
+            defaultLogin: st.surgeEmail || "",
             onClose: function () { setShowConnect(false); } })
         : null,
       iterFor
@@ -1794,6 +1795,18 @@
                 } },
               allOn ? "☐ Select none" : "☑ Select all");
           })(),
+          h("button", {
+              className: "sl-tag",
+              style: st.keys.surge
+                ? { color: "var(--color-primary, #14b8a6)",
+                    borderColor: "color-mix(in srgb, var(--color-primary, #14b8a6) 60%, transparent)",
+                    cursor: "pointer", fontSize: 11.5 }
+                : { cursor: "pointer", fontSize: 11.5 },
+              title: st.keys.surge
+                ? "surge.sh connected — click to switch accounts"
+                : "Create / sign in to your surge.sh account",
+              onClick: function () { setShowConnect("surge"); },
+            }, st.keys.surge ? "✓ surge connected" : "🔗 Connect surge"),
           h("button", { className: "sl-btn", style: { fontSize: 12 },
               disabled: pubBusy,
               title: st.keys.surge

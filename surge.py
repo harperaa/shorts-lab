@@ -78,6 +78,25 @@ def login(email: str, password: str) -> dict:
     return {"ok": True, "token": tok}
 
 
+def default_email() -> str:
+    """Best-known email to prefill the connect form — the stored surge
+    login first, then common instance-identity env vars, then git."""
+    for var in ("SURGE_LOGIN", "MENTEE_EMAIL", "HERMES_USER_EMAIL", "EMAIL"):
+        v = (os.environ.get(var) or "").strip()
+        if "@" in v:
+            return v
+    try:
+        import subprocess
+        v = subprocess.run(["git", "config", "user.email"],
+                           capture_output=True, text=True,
+                           timeout=5).stdout.strip()
+        if "@" in v:
+            return v
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
 def validate(tok: str) -> dict:
     """Cheapest possible auth check: the account's project list."""
     try:
