@@ -614,24 +614,31 @@ def adlab_generate(body: AdLabBody):
         for i, prompt in enumerate(prompts):
             title = (plan.get("title") or "Ad creative") + \
                 (f" — variant {i + 1}/{n}" if n > 1 else "")
-            this_copy = (copies[i] if i < len(copies)
-                         else plan.get("adCopy") or "")
+            this_copy = analysis.strip_cta_label(
+                copies[i] if i < len(copies)
+                else plan.get("adCopy") or "")
             raw_takes = (take_sets[i] if i < len(take_sets) else None) or []
-            takes = [str(t)[:300] for t in raw_takes if str(t).strip()][:3]
+            takes = [analysis.strip_cta_label(t)[:300]
+                     for t in raw_takes if str(t).strip()][:3]
             if this_copy and this_copy not in takes:
                 takes = [this_copy[:300]] + takes[:2]
             raw_posts = post_flat[i * 3:(i + 1) * 3] or post_flat[:3]
             posts = []
             for t in raw_posts[:3]:
                 if isinstance(t, dict):
-                    p = {"hook": str(t.get("hook") or "")[:400],
-                         "content": str(t.get("content") or "")[:4000],
-                         "cta": str(t.get("cta") or "")[:300]}
+                    p = {"hook": analysis.strip_cta_label(
+                            t.get("hook") or "")[:400],
+                         "content": analysis.strip_cta_label(
+                            t.get("content") or "")[:4000],
+                         "cta": analysis.strip_cta_label(
+                            t.get("cta") or "")[:300]}
                     if p["hook"] or p["content"]:
                         posts.append(p)
                 elif str(t).strip():          # planner fell back to plain text
                     posts.append(
-                        {"hook": "", "content": str(t)[:4000], "cta": ""})
+                        {"hook": "",
+                         "content": analysis.strip_cta_label(t)[:4000],
+                         "cta": ""})
             take_prompts = ([prompt + t for t in _VISUAL_TAKES]
                             if body.visualVariants else [prompt])
             task_id = None

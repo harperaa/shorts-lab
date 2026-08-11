@@ -416,6 +416,14 @@ def build_ad_prompt(brief: str, ad_context: str = "",
         "CTA framing) — and copyVariants with the matching improved copy "
         "take for each, in the same order. Never ask a single image to "
         "contain multiple variations." if variants > 1 else "")
+    ban_note = (
+        "\n\nBANNED TOKEN: the literal letters \"CTA\" must NEVER "
+        "appear in any output text — not in adCopy, copyTakes, "
+        "postCopyVariants (hook/content/cta values), and never as "
+        "rendered text inside the generationPrompt. \"CTA\" is jargon "
+        "for you, not copy for the ad: always write the actual "
+        "call-to-action wording itself (e.g. 'Tap the link', 'Start "
+        "free today'), with no label in front of it.")
     stage = FUNNEL_STAGES.get((funnel or "").strip().lower())
     funnel_note = ("\n\n" + stage["directive"] +
                    " EVERY output — generationPrompt, adCopy, copyTakes, "
@@ -445,8 +453,8 @@ def build_ad_prompt(brief: str, ad_context: str = "",
         "variant (vary only the prose around them) — never guess, "
         "reword, or invent bullet content.\n\n"
         f"USER'S BRIEF (product/offer/audience): {brief.strip()[:2000]}"
-        + funnel_note + ad_note + identity_note + variant_note
-        + marketing_context())
+        + ban_note + funnel_note + ad_note + identity_note
+        + variant_note + marketing_context())
     return dict(_complete(
         "Compose one image-generation prompt that transfers a winning ad's "
         "style onto the user's own subject and offer.",
@@ -564,7 +572,10 @@ def spellcheck_image(image_url: str, expected_copy: str = "",
             "You are proofing an AI-generated ad image. Read EVERY piece of "
             "rendered text. textOk=true only if all words are correctly "
             "spelled and cleanly legible — gibberish glyphs, mangled or "
-            "duplicated letters, and misspellings all fail."
+            "duplicated letters, and misspellings all fail. Also fail "
+            "textOk if the literal letters 'CTA' appear anywhere in the "
+            "rendered text (that label is jargon, never ad copy) — add "
+            "an issue starting 'literal CTA rendered'."
             + expected + person + style),
         input=inputs,
         json_schema=_SPELLCHECK_SCHEMA,
@@ -682,3 +693,20 @@ def video_qa(frame_urls: list, expected: str,
     return {"ok": ok,
             "issues": [str(i)[:140] for i in (parsed.get("issues")
                                               or [])][:5]}
+
+
+_CTA_LABEL_PATTERNS = [
+    # "(CTA)" asides, "CTA:" / "CTA —" labels, and bare CTA tokens —
+    # the letters must never survive into shipped copy
+    (r"\(\s*CTA\s*\)", ""),
+    (r"\bC\.?T\.?A\b\.?\s*[:\-–—]?\s*", ""),
+]
+
+
+def strip_cta_label(text: str) -> str:
+    """Remove any literal 'CTA' jargon that leaked into copy."""
+    import re
+    out = str(text or "")
+    for pat, repl in _CTA_LABEL_PATTERNS:
+        out = re.sub(pat, repl, out)
+    return re.sub(r"[ \t]{2,}", " ", out).strip()

@@ -764,3 +764,46 @@ def test_pending_check_passes_style_url_to_qa(home, monkeypatch):
     papi.creations_check(papi.CreationBody(id=cid))
     assert seen == {"source_url": "https://i.ibb.co/me.jpg",
                     "style_url": "https://i.ibb.co/winner.png"}
+
+
+def test_literal_cta_never_survives(home, monkeypatch):
+    # scrubber: label forms, asides, and bare tokens all removed
+    f = analysis.strip_cta_label
+    assert f("CTA: Tap the link and start today") == \
+        "Tap the link and start today"
+    assert f("Tap the link (CTA)") == "Tap the link"
+    assert f("Strong C.T.A. — Buy now") == "Strong Buy now"
+    assert f("Grab your seat — it's free") == "Grab your seat — it's free"
+    assert "CTA" not in f("cta: Start now")
+
+    # planner prompt carries the ban
+    captured = {}
+
+    class R:
+        parsed = {"title": "t", "generationPrompt": "p", "adCopy": "c",
+                  "notes": "n"}
+
+    class L:
+        def complete_structured(self, **kw):
+            captured.update(kw)
+            return R()
+
+    monkeypatch.setattr(analysis, "_llm", lambda: L())
+    analysis.build_ad_prompt("brief", funnel="bof")
+    assert "BANNED TOKEN" in captured["input"][0]["text"]
+
+    # image QA fails renders containing the literal letters
+    class RQ:
+        parsed = {"textOk": False, "personMatch": True, "replacedOk": True,
+                  "readText": "CTA: BUY NOW",
+                  "issues": ["literal CTA rendered in the footer"]}
+
+    class LQ:
+        def complete_structured(self, **kw):
+            captured["qa"] = kw["instructions"]
+            return RQ()
+
+    monkeypatch.setattr(analysis, "_llm", lambda: LQ())
+    v = analysis.spellcheck_image("https://cdn/x.png", "Buy now")
+    assert v["ok"] is False
+    assert "literal CTA" in captured["qa"]
