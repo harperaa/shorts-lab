@@ -167,6 +167,33 @@
 
   var API = "/api/plugins/shorts-lab";
 
+  function downloadFile(path, fallbackName) {
+    // server routes set Content-Disposition; loopback needs the token
+    var headers = {};
+    try {
+      if (window.__HERMES_SESSION_TOKEN__) {
+        headers["X-Hermes-Session-Token"] = window.__HERMES_SESSION_TOKEN__;
+      }
+    } catch (e) {}
+    return fetch(API + path, { headers: headers })
+      .then(function (r) {
+        if (!r.ok) throw new Error("download failed (HTTP " + r.status + ")");
+        var cd = r.headers.get("Content-Disposition") || "";
+        var m = /filename="([^"]+)"/.exec(cd);
+        return r.blob().then(function (b) {
+          var a = document.createElement("a");
+          a.href = URL.createObjectURL(b);
+          a.download = (m && m[1]) || fallbackName || "download";
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(function () {
+            URL.revokeObjectURL(a.href);
+            a.remove();
+          }, 4000);
+        });
+      });
+  }
+
   function api(path, options) {
     return SDK.fetchJSON(API + path, options);
   }
@@ -1946,6 +1973,30 @@
     var adStyleSt = useState(props.adStyleUrl || saved.adStyle || "");
     var adStyle = adStyleSt[0], setAdStyle = adStyleSt[1];
     var varSt = useState(saved.variants || 1);
+    var funnelSt = useState(saved.funnel || "tof");
+    var funnel = funnelSt[0], setFunnel = funnelSt[1];
+    var v3St = useState(saved.visual3 !== false);   // ON by default
+    var visual3 = v3St[0], setVisual3 = v3St[1];
+
+    var FUNNELS = [
+      ["tof", "🎯 Top — attention",
+       "Cold scroll-stoppers: bold hook, curiosity, no hard sell."],
+      ["mof", "📚 Middle — educate",
+       "Benefits, how-it-works, proof points, differentiation."],
+      ["bof", "💰 Bottom — close",
+       "The offer, urgency, guarantee, one compelling CTA."],
+    ];
+    var BRIEF_PH = {
+      tof: "Who are we stopping mid-scroll? The audience + the bold " +
+        "hook or curiosity angle — e.g. 'career-switchers doom-" +
+        "scrolling job boards; hook: your resume isn't the problem'…",
+      mof: "What should they learn? Product + the key benefits, how it " +
+        "works, and one proof point — e.g. 'AI security bootcamp: " +
+        "hands-on labs, hiring-manager coaching, 500+ alumni'…",
+      bof: "What closes the deal? The offer, price, deadline, " +
+        "guarantee — e.g. '$497 launch week (goes to $997 Friday), " +
+        "14-day money-back, seats capped at 50'…",
+    };
     var variants = varSt[0], setVariants = varSt[1];
     var iterSt = useState(null);       // creation being iterated
     var iterFor = iterSt[0], setIterFor = iterSt[1];
@@ -2097,9 +2148,11 @@
       try {
         localStorage.setItem("sl-adlab", JSON.stringify({
           brief: brief, adContext: adContext, source: source,
-          styleRef: styleRef, adStyle: adStyle, variants: variants }));
+          styleRef: styleRef, adStyle: adStyle, variants: variants,
+          funnel: funnel, visual3: visual3 }));
       } catch (e) {}
-    }, [brief, adContext, source, styleRef, adStyle, variants]);
+    }, [brief, adContext, source, styleRef, adStyle, variants, funnel,
+        visual3]);
 
     function clearForm() {
       setBrief(""); setAdContext(""); setSource(null);
@@ -2128,7 +2181,7 @@
         sourceAssetId: source ? source.id : "",
         styleAssetId: styleRef ? styleRef.id : "",
         styleUrl: (!styleRef && adStyle) ? adStyle : "",
-        variants: variants,
+        variants: variants, funnel: funnel, visualVariants: visual3,
       })
         .then(function (r) { props.onState(r.state); setOpen(r.creationId); })
         .catch(function (e) { setErr(String((e && e.message) || e)); })
@@ -2277,9 +2330,34 @@
           "composition, text placement, and mood — with your offer's copy. " +
           "Grab a screenshot of the winning creative (View creative ↗ on " +
           "Ads Research) as the style reference."),
+        h("div", { style: { display: "flex", gap: 6, flexWrap: "wrap",
+            alignItems: "center", marginBottom: 8 } },
+          FUNNELS.map(function (f) {
+            var on = funnel === f[0];
+            return h("button", { key: f[0], className: "sl-tag",
+                style: on
+                  ? { color: "var(--color-primary, #14b8a6)",
+                      borderColor: "color-mix(in srgb, var(--color-primary, #14b8a6) 60%, transparent)",
+                      cursor: "pointer" }
+                  : { cursor: "pointer" },
+                title: f[2],
+                onClick: function () { setFunnel(f[0]); } }, f[1]);
+          }),
+          h("span", { style: { flex: 1 } }),
+          h("button", { className: "sl-tag",
+              style: visual3
+                ? { color: "var(--color-primary, #14b8a6)",
+                    borderColor: "color-mix(in srgb, var(--color-primary, #14b8a6) 60%, transparent)",
+                    cursor: "pointer" }
+                : { cursor: "pointer" },
+              title: "Each concept renders as three visual takes — same " +
+                "copy, different angle, composition, and look — stacked " +
+                "on the card with per-take downloads",
+              onClick: function () { setVisual3(!visual3); } },
+            visual3 ? "🖼×3 visual takes" : "🖼×1 single take")),
         h("textarea", {
           className: "sl-input", rows: 3, ref: briefRef,
-          placeholder: "Your product/offer + audience — e.g. 'AI security bootcamp for career-switchers, $497, launch week urgency'…",
+          placeholder: BRIEF_PH[funnel] || BRIEF_PH.tof,
           value: brief,
           onChange: function (e) { setBrief(e.target.value); },
         }),
@@ -2653,9 +2731,49 @@
                 ? h("div", { style: { display: "flex", gap: 14,
                       flexWrap: "wrap", alignItems: "flex-start",
                       marginTop: 10 } },
-                    h(AuthImg, { className: "sl-result-img",
-                        style: { maxWidth: 380, flex: "0 1 380px" },
-                        src: c.resultUrl, alt: c.title }),
+                    (function () {
+                      var imgs = (c.images && c.images.length)
+                        ? c.images : [c.resultUrl];
+                      return h("div", { style: { display: "flex",
+                          flexDirection: "column", gap: 12,
+                          flex: "0 1 380px", maxWidth: 380 } },
+                        imgs.map(function (u, ii) {
+                          return h("div", { key: ii },
+                            h(AuthImg, { className: "sl-result-img",
+                                style: { width: "100%" },
+                                src: u,
+                                alt: c.title + " take " + (ii + 1) }),
+                            h("button", { className: "sl-btn",
+                                style: { fontSize: 12, marginTop: 6 },
+                                title: "Download this take (named after " +
+                                  "the ad title)",
+                                onClick: function () {
+                                  downloadFile("/creation/" + c.id +
+                                    "/image/" + ii,
+                                    c.title + " take " + (ii + 1))
+                                    .catch(function (e2) {
+                                      setErr(String((e2 && e2.message)
+                                        || e2));
+                                    });
+                                } },
+                              "⬇ Download" + (imgs.length > 1
+                                ? " take " + (ii + 1) : "")));
+                        }),
+                        imgs.length > 1
+                          ? h("button", { className: "sl-btn",
+                              style: { fontSize: 12 },
+                              title: "All takes in one zip, named after " +
+                                "the ad title",
+                              onClick: function () {
+                                downloadFile("/creation/" + c.id + "/zip",
+                                  c.title + ".zip")
+                                  .catch(function (e2) {
+                                    setErr(String((e2 && e2.message)
+                                      || e2));
+                                  });
+                              } }, "🗜 Download all (zip)")
+                          : null);
+                    })(),
                     (c.postCopy || []).length
                       ? (function () {
                           var sel = Math.min(postSel[c.id] || 0,

@@ -329,9 +329,59 @@ _AD_PROMPT_SCHEMA = {
 }
 
 
+# Funnel-stage directives — distilled from the classic awareness/
+# consideration/conversion ad-funnel playbook (and the bundled meta
+# copy guide): each stage changes the JOB of the ad, so hook, body,
+# proof, and CTA all shift with it.
+FUNNEL_STAGES = {
+    "tof": {
+        "label": "Top of funnel — attention",
+        "directive": (
+            "FUNNEL STAGE: TOP OF FUNNEL (awareness / attention-"
+            "gathering). The audience is COLD — they don't know the "
+            "product and didn't ask. The ad's only job is to stop the "
+            "scroll and earn a first moment of attention. Copy: a bold "
+            "pattern-interrupt hook, a curiosity gap or sharply "
+            "relatable pain, an emotional or surprising claim. Keep "
+            "product detail minimal, NO price, no hard sell. Visual: "
+            "one unexpected high-contrast focal point, minimal text. "
+            "CTA is SOFT: Learn more / See why / Follow along."),
+    },
+    "mof": {
+        "label": "Middle of funnel — educate",
+        "directive": (
+            "FUNNEL STAGE: MIDDLE OF FUNNEL (consideration / "
+            "informational-educational). The audience already knows the "
+            "problem and is weighing options. The ad's job is to teach "
+            "and build trust. Copy: lead with the strongest BENEFIT, "
+            "explain how it works in plain words, add a concrete proof "
+            "point (number, mini case, credential) and differentiation "
+            "vs the obvious alternative; pre-empt one objection. "
+            "Visual: product-in-use, before/after, checklist or "
+            "diagram energy, credibility cues. CTA is MEDIUM: See how "
+            "it works / Get the guide / Watch the demo."),
+    },
+    "bof": {
+        "label": "Bottom of funnel — close",
+        "directive": (
+            "FUNNEL STAGE: BOTTOM OF FUNNEL (conversion / closing). "
+            "The audience is warm and deciding NOW. The ad's job is to "
+            "close. Copy: the concrete offer (price, bonus, or "
+            "guarantee stated plainly), real urgency or scarcity "
+            "(deadline, limited seats — never fake), risk reversal, a "
+            "short testimonial or result line, and ONE compelling, "
+            "direct CTA. Visual: product/offer hero with the deal "
+            "unmissable — price or deadline badge energy. CTA is HARD: "
+            "Buy now / Claim your spot / Start today before the "
+            "deadline."),
+    },
+}
+
+
 def build_ad_prompt(brief: str, ad_context: str = "",
                     variants: int = 1,
-                    has_source_image: bool = False) -> dict:
+                    has_source_image: bool = False,
+                    funnel: str = "") -> dict:
     """Compose the style-transfer generation prompt (image-ad-clone style:
     extract what makes the winner work, re-parameterize with the user's
     subject and offer). With variants > 1, also produce that many distinct
@@ -366,6 +416,11 @@ def build_ad_prompt(brief: str, ad_context: str = "",
         "CTA framing) — and copyVariants with the matching improved copy "
         "take for each, in the same order. Never ask a single image to "
         "contain multiple variations." if variants > 1 else "")
+    stage = FUNNEL_STAGES.get((funnel or "").strip().lower())
+    funnel_note = ("\n\n" + stage["directive"] +
+                   " EVERY output — generationPrompt, adCopy, copyTakes, "
+                   "and all postCopyVariants — must be written for this "
+                   "funnel stage.") if stage else ""
     prompt = (
         "You are an ad creative director doing a style transfer (the "
         "image-ad-clone method): study the winning reference ad, extract "
@@ -390,7 +445,8 @@ def build_ad_prompt(brief: str, ad_context: str = "",
         "variant (vary only the prose around them) — never guess, "
         "reword, or invent bullet content.\n\n"
         f"USER'S BRIEF (product/offer/audience): {brief.strip()[:2000]}"
-        + ad_note + identity_note + variant_note + marketing_context())
+        + funnel_note + ad_note + identity_note + variant_note
+        + marketing_context())
     return dict(_complete(
         "Compose one image-generation prompt that transfers a winning ad's "
         "style onto the user's own subject and offer.",

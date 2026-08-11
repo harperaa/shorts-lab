@@ -116,6 +116,7 @@ def _public_state() -> dict:
             "id": c["id"], "kind": c["kind"], "title": c["title"],
             "brief": c["brief"], "status": c["status"],
             "resultUrl": c.get("result_url") or "",
+            "images": (c.get("source") or {}).get("images") or [],
             "error": c.get("error") or "",
             "createdAt": c.get("created_at"),
             "pattern": (c.get("source") or {}).get("pattern", ""),
@@ -469,21 +470,38 @@ def _qa_pair(gen, ad_copy: str, source_spell: str = "") -> tuple:
 
 
 def _hermes_batch(jobs):
-    """[(cid, prompt, source_url, refs, ad_copy)] — the instance's image
-    model is synchronous, so a daemon thread fills creations as each
-    finishes (spellcheck + retries inline)."""
+    """[(cid, [prompts], source_url, refs, ad_copy)] — the instance's
+    image model is synchronous, so a daemon thread fills creations as
+    each finishes (spellcheck + retries inline). Multiple prompts per
+    creation = the visual takes, stacked into source.images."""
     def worker():
-        for cid, prompt, src_url, refs, ad_copy in jobs:
-            try:
-                def gen():
-                    return imagegen.import_result(
-                        imagegen.hermes_generate(prompt, src_url, refs))
-                url, warn = _qa_pair(gen, ad_copy, src_url or "")
-                store.update_creation(cid, status="ready",
-                                      result_url=url, error=warn)
-            except Exception as exc:  # noqa: BLE001
-                store.update_creation(cid, status="failed",
-                                      error=str(exc)[:300])
+        for cid, prompts, src_url, refs, ad_copy in jobs:
+            if isinstance(prompts, str):          # legacy single-prompt
+                prompts = [prompts]
+            images, warns = [], []
+            for prompt in prompts:
+                try:
+                    def gen(p=prompt):
+                        return imagegen.import_result(
+                            imagegen.hermes_generate(p, src_url, refs))
+                    url, warn = _qa_pair(gen, ad_copy, src_url or "")
+                    images.append(url)
+                    if warn:
+                        warns.append(warn)
+                except Exception as exc:  # noqa: BLE001
+                    warns.append(f"take {len(images) + 1}: "
+                                 f"{str(exc)[:120]}")
+            c = store.get_creation(cid)
+            src = dict((c or {}).get("source") or {})
+            src["images"] = images
+            if images:
+                store.update_creation(cid, status="ready", source=src,
+                                      result_url=images[0],
+                                      error="; ".join(warns)[:300])
+            else:
+                store.update_creation(cid, status="failed", source=src,
+                                      error="; ".join(warns)[:300]
+                                            or "all takes failed")
     threading.Thread(target=worker, daemon=True).start()
 
 
@@ -508,6 +526,25 @@ class AdLabBody(BaseModel):
     sourceUrl: str = ""
     styleUrl: str = ""
     variants: int = 1
+    funnel: str = "tof"          # tof | mof | bof
+    visualVariants: bool = True  # 3 visual takes per concept
+
+
+# per-take art direction: same concept and (near-)same copy, different
+# camera/composition/look — appended to the base prompt for takes 2-3
+_VISUAL_TAKES = [
+    "",
+    " ALTERNATE VISUAL TAKE — keep the exact same concept and the same "
+    "ad copy text (word for word, or with only the slightest wording "
+    "shift), but shoot it from a DIFFERENT camera angle and "
+    "composition: three-quarter or side viewpoint, different framing "
+    "distance, rearranged layout. Same person/product identity.",
+    " ALTERNATE VISUAL TAKE — keep the exact same concept and the same "
+    "ad copy text (word for word, or with only the slightest wording "
+    "shift), but give it a DIFFERENT look: new setting or backdrop "
+    "treatment, different lighting mood and color grade. Same "
+    "person/product identity.",
+]
 
 
 @router.post("/adlab/generate")
@@ -547,7 +584,8 @@ def adlab_generate(body: AdLabBody):
                             or (body.sourceUrl or "").strip())
         plan = analysis.build_ad_prompt(body.brief, body.adContext or "",
                                         variants=n,
-                                        has_source_image=has_portrait)
+                                        has_source_image=has_portrait,
+                                        funnel=body.funnel or "")
         prompts = [str(p) for p in (plan.get("variantPrompts") or [])
                    if str(p).strip()][:n]
         copies = [str(c) for c in (plan.get("copyVariants") or [])
@@ -591,15 +629,22 @@ def adlab_generate(body: AdLabBody):
                 elif str(t).strip():          # planner fell back to plain text
                     posts.append(
                         {"hook": "", "content": str(t)[:4000], "cta": ""})
+            take_prompts = ([prompt + t for t in _VISUAL_TAKES]
+                            if body.visualVariants else [prompt])
             task_id = None
+            pending = []
             if backend == "kie":
-                try:
-                    task_id = kie.submit_image(prompt, aspect_ratio="1:1",
+                for tp in take_prompts:
+                    try:
+                        tid = kie.submit_image(tp, aspect_ratio="1:1",
                                                source_url=source_url,
                                                ref_urls=refs)
-                except Exception as exc:  # noqa: BLE001
-                    errors.append(f"variant {i + 1}: {str(exc)[:120]}")
+                        pending.append({"t": tid, "p": tp[:4000], "r": 0})
+                    except Exception as exc:  # noqa: BLE001
+                        errors.append(f"variant {i + 1}: {str(exc)[:120]}")
+                if not pending:
                     continue
+                task_id = pending[0]["t"]
             takes_md = "\n".join(
                 f"{j + 1}. {t}" for j, t in enumerate(takes)) or this_copy
             posts_md = "\n\n".join(
@@ -623,11 +668,14 @@ def adlab_generate(body: AdLabBody):
                                       else (source_url or "")),
                         "styleUrl": ("" if backend == "hermes"
                                      else (refs[0] if refs else "")),
+                        "funnel": body.funnel or "",
+                        "pending": pending, "images": [],
                         "retries": 0})
             if task_id:
                 store.update_creation(cid, task_id=task_id)
             else:
-                hermes_jobs.append((cid, prompt, source_url, refs, this_copy))
+                hermes_jobs.append((cid, take_prompts, source_url, refs,
+                                    this_copy))
             if first_cid is None:
                 first_cid = cid
         if hermes_jobs:
@@ -1048,6 +1096,87 @@ def _creation_image_bytes(result_url: str) -> bytes:
     return r.content
 
 
+def _creation_images(c: dict) -> list:
+    imgs = (c.get("source") or {}).get("images") or []
+    if not imgs and c.get("result_url"):
+        imgs = [c["result_url"]]
+    return imgs
+
+
+def _disposition(name: str) -> str:
+    """Content-Disposition safe for non-ASCII titles (em-dashes!):
+    latin-1 headers get an ASCII fallback plus RFC 5987 filename*."""
+    from urllib.parse import quote
+    ascii_name = name.encode("ascii", "replace").decode().replace("?", "-")
+    return (f'attachment; filename="{ascii_name}"; '
+            f"filename*=UTF-8''{quote(name)}")
+
+
+def _img_ext(url: str) -> str:
+    tail = (url or "").split("?")[0].lower()
+    for ext in (".png", ".jpg", ".jpeg", ".webp"):
+        if tail.endswith(ext):
+            return ext.lstrip(".")
+    return "png"
+
+
+@router.get("/creation/{cid}/image/{idx}")
+def creation_image_download(cid: int, idx: int):
+    """One take as an attachment — filename from the title (surge's
+    filesystem-safe convention)."""
+    c = store.get_creation(cid)
+    if not c:
+        raise HTTPException(status_code=404, detail="creation not found")
+    imgs = _creation_images(c)
+    if idx < 0 or idx >= len(imgs):
+        raise HTTPException(status_code=404, detail="no such take")
+    try:
+        payload = _creation_image_bytes(imgs[idx])
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=str(exc)[:200])
+    name = surge._safe_filename(
+        (c.get("title") or "ad")
+        + (f" — take {idx + 1}" if len(imgs) > 1 else ""),
+        _img_ext(imgs[idx]))
+    from fastapi.responses import Response
+    return Response(content=payload, media_type="application/octet-stream",
+                    headers={"Content-Disposition": _disposition(name)})
+
+
+def _creation_zip_bytes(c: dict) -> tuple:
+    """(zip bytes, zip filename) for all of a creation's takes."""
+    import io
+    import zipfile
+    imgs = _creation_images(c)
+    if not imgs:
+        raise RuntimeError("no images on this creation")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for i, url in enumerate(imgs):
+            payload = _creation_image_bytes(url)
+            entry = surge._safe_filename(
+                (c.get("title") or "ad")
+                + (f" — take {i + 1}" if len(imgs) > 1 else ""),
+                _img_ext(url))
+            zf.writestr(entry, payload)
+    return buf.getvalue(), surge._safe_filename(
+        c.get("title") or "ad", "zip")
+
+
+@router.get("/creation/{cid}/zip")
+def creation_zip_download(cid: int):
+    c = store.get_creation(cid)
+    if not c:
+        raise HTTPException(status_code=404, detail="creation not found")
+    try:
+        payload, name = _creation_zip_bytes(c)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=str(exc)[:200])
+    from fastapi.responses import Response
+    return Response(content=payload, media_type="application/zip",
+                    headers={"Content-Disposition": _disposition(name)})
+
+
 class CreationBody(BaseModel):
     id: int = 0
 
@@ -1057,6 +1186,64 @@ def creations_check(body: CreationBody):
     c = store.get_creation(body.id)
     if not c:
         raise HTTPException(status_code=404, detail="creation not found")
+    src0 = dict(c.get("source") or {})
+    if c["status"] == "generating" and src0.get("pending"):
+        # multi-take KIE creation: poll every outstanding take, spellcheck
+        # each as it lands, per-take retry (max 2) on QA failure
+        pending, images = list(src0["pending"]), list(src0.get("images")
+                                                      or [])
+        warns = [w for w in [c.get("error") or ""] if w]
+        still = []
+        for entry in pending:
+            try:
+                tick = kie.check_task(entry["t"])
+            except Exception:  # noqa: BLE001 — transient poll error
+                still.append(entry)
+                continue
+            if tick["state"] == "success":
+                verdict = None
+                try:
+                    verdict = analysis.spellcheck_image(
+                        tick["url"], src0.get("adCopy") or "",
+                        source_url=src0.get("sourceUrl") or "")
+                except Exception:  # noqa: BLE001
+                    verdict = None
+                if verdict is not None and not verdict["ok"] \
+                        and int(entry.get("r") or 0) < 2:
+                    try:
+                        tid = kie.submit_image(
+                            entry["p"], aspect_ratio="1:1",
+                            source_url=src0.get("sourceUrl") or None,
+                            ref_urls=[u for u in [src0.get("styleUrl")]
+                                      if u])
+                        still.append({"t": tid, "p": entry["p"],
+                                      "r": int(entry.get("r") or 0) + 1})
+                        continue
+                    except Exception:  # noqa: BLE001
+                        pass
+                if verdict is not None and not verdict["ok"]:
+                    warns.append("take QA issues persisted: "
+                                 + "; ".join(verdict["issues"])[:120])
+                images.append(tick["url"])
+            elif tick["state"] == "fail":
+                warns.append(f"take failed: "
+                             f"{str(tick.get('error') or '')[:100]}")
+            else:
+                still.append(entry)
+        src0["pending"] = still
+        src0["images"] = images
+        if still:
+            store.update_creation(body.id, source=src0,
+                                  error="; ".join(warns)[:300])
+        elif images:
+            store.update_creation(body.id, status="ready", source=src0,
+                                  result_url=images[0],
+                                  error="; ".join(warns)[:300])
+        else:
+            store.update_creation(body.id, status="failed", source=src0,
+                                  error="; ".join(warns)[:300]
+                                        or "all takes failed")
+        return {"ok": True, "state": _public_state()}
     if c["status"] == "generating" and c.get("task_id"):
         fam = (c.get("source") or {}).get("family") or "jobs"
         try:

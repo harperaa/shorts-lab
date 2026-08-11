@@ -583,3 +583,118 @@ def test_kie_cdn_refs_rehosted_for_generation(home, monkeypatch):
     # non-KIE-CDN URLs pass through untouched
     assert recipes._public_ref("https://i.ibb.co/y.jpg") == \
         "https://i.ibb.co/y.jpg"
+
+
+# ---------------------------------------------------------------------------
+# funnel stages + visual takes + downloads
+# ---------------------------------------------------------------------------
+
+def _load_papi():
+    name = "sl_papi_test"
+    if name in sys.modules:
+        return sys.modules[name]
+    spec = importlib.util.spec_from_file_location(
+        name, ROOT / "dashboard" / "plugin_api.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_funnel_directives_shape_the_planner(home, monkeypatch):
+    captured = {}
+
+    class R:
+        parsed = {"title": "t", "generationPrompt": "p", "adCopy": "c",
+                  "notes": "n"}
+
+    class L:
+        def complete_structured(self, **kw):
+            captured.update(kw)
+            return R()
+
+    monkeypatch.setattr(analysis, "_llm", lambda: L())
+    analysis.build_ad_prompt("brief", funnel="tof")
+    assert "TOP OF FUNNEL" in captured["input"][0]["text"]
+    assert "stop the scroll" in captured["input"][0]["text"]
+    analysis.build_ad_prompt("brief", funnel="bof")
+    assert "BOTTOM OF FUNNEL" in captured["input"][0]["text"]
+    assert "urgency" in captured["input"][0]["text"]
+    analysis.build_ad_prompt("brief", funnel="mof")
+    assert "MIDDLE OF FUNNEL" in captured["input"][0]["text"]
+    # unknown/empty stage adds no stage banner
+    analysis.build_ad_prompt("brief", funnel="")
+    assert "FUNNEL STAGE" not in captured["input"][0]["text"]
+
+
+def test_creation_zip_names_entries_after_title(home):
+    papi = _load_papi()
+    a1 = kie.save_asset("t1.png", b"\x89PNG-one" * 8)
+    a2 = kie.save_asset("t2.png", b"\x89PNG-two" * 8)
+    cid = store.create_creation(
+        "image-ad", "Launch Week — variant 1/2", "b", "c",
+        status="ready",
+        source={"images": [f"/api/plugins/shorts-lab/asset/{a1}",
+                           f"/api/plugins/shorts-lab/asset/{a2}"]})
+    c = store.get_creation(cid)
+    payload, name = papi._creation_zip_bytes(c)
+    assert name == "Launch Week — variant 1-2.zip"
+    import io
+    import zipfile
+    with zipfile.ZipFile(io.BytesIO(payload)) as zf:
+        names = sorted(zf.namelist())
+    assert names == ["Launch Week — variant 1-2 — take 1.png",
+                     "Launch Week — variant 1-2 — take 2.png"]
+
+
+def test_check_pending_multi_take_flow(home, monkeypatch):
+    papi = _load_papi()
+    cid = store.create_creation(
+        "image-ad", "Multi", "b", "c", status="generating",
+        source={"adCopy": "copy", "pending": [
+            {"t": "tk1", "p": "prompt one", "r": 0},
+            {"t": "tk2", "p": "prompt two", "r": 0}],
+            "images": []})
+    store.update_creation(cid, task_id="tk1")
+
+    ticks = {"tk1": {"state": "success", "url": "https://cdn/a.png"},
+             "tk2": {"state": "generating"}}
+    monkeypatch.setattr(papi.kie, "check_task", lambda t: ticks[t])
+    monkeypatch.setattr(papi.analysis, "spellcheck_image",
+                        lambda *a, **k: {"ok": True, "issues": []})
+    papi.creations_check(papi.CreationBody(id=cid))
+    c = store.get_creation(cid)
+    assert c["status"] == "generating"
+    assert c["source"]["images"] == ["https://cdn/a.png"]
+    assert [p["t"] for p in c["source"]["pending"]] == ["tk2"]
+
+    ticks["tk2"] = {"state": "success", "url": "https://cdn/b.png"}
+    papi.creations_check(papi.CreationBody(id=cid))
+    c = store.get_creation(cid)
+    assert c["status"] == "ready"
+    assert c["source"]["images"] == ["https://cdn/a.png",
+                                    "https://cdn/b.png"]
+    assert c["result_url"] == "https://cdn/a.png"
+
+
+def test_check_pending_retries_failed_qa_take(home, monkeypatch):
+    papi = _load_papi()
+    cid = store.create_creation(
+        "image-ad", "QA", "b", "c", status="generating",
+        source={"adCopy": "copy", "pending": [
+            {"t": "bad1", "p": "the prompt", "r": 0}], "images": []})
+    monkeypatch.setattr(papi.kie, "check_task",
+                        lambda t: {"state": "success",
+                                   "url": "https://cdn/misspelled.png"})
+    monkeypatch.setattr(papi.analysis, "spellcheck_image",
+                        lambda *a, **k: {"ok": False,
+                                         "issues": ["typo in headline"]})
+    resub = {}
+    monkeypatch.setattr(papi.kie, "submit_image",
+                        lambda p, **k: resub.update(p=p) or "bad2")
+    papi.creations_check(papi.CreationBody(id=cid))
+    c = store.get_creation(cid)
+    assert c["status"] == "generating"           # take resubmitted
+    assert c["source"]["pending"] == [{"t": "bad2", "p": "the prompt",
+                                      "r": 1}]
+    assert resub["p"] == "the prompt"
