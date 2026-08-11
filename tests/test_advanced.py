@@ -698,3 +698,69 @@ def test_check_pending_retries_failed_qa_take(home, monkeypatch):
     assert c["source"]["pending"] == [{"t": "bad2", "p": "the prompt",
                                       "r": 1}]
     assert resub["p"] == "the prompt"
+
+
+def test_qa_rejects_unreplaced_style_reference(home, monkeypatch):
+    """A take that echoes the style-reference ad (its original subject
+    still in place) must fail QA and trigger the retry path."""
+    captured = {}
+
+    class R:
+        parsed = {"textOk": True, "personMatch": True, "replacedOk": False,
+                  "readText": "ok",
+                  "issues": ["source not replaced: reference ad's model "
+                             "still present"]}
+
+    class L:
+        def complete_structured(self, **kw):
+            captured.update(kw)
+            return R()
+
+    monkeypatch.setattr(analysis, "_llm", lambda: L())
+    v = analysis.spellcheck_image(
+        "https://cdn/out.png", "copy",
+        source_url="data:image/jpeg;base64,SRC",
+        style_url="https://i.ibb.co/style.png")
+    assert v["ok"] is False and v["replacedOk"] is False
+    assert "source not replaced" in v["issues"][0]
+    # ad + source + style all shown to the checker, style labeled
+    assert [i["url"] for i in captured["input"]] == [
+        "https://cdn/out.png", "data:image/jpeg;base64,SRC",
+        "https://i.ibb.co/style.png"]
+    assert "STYLE REFERENCE" in captured["instructions"]
+    assert "REPLACED" in captured["instructions"]
+
+    # clean replacement passes
+    R.parsed = {"textOk": True, "personMatch": True, "replacedOk": True,
+                "readText": "ok", "issues": []}
+    assert analysis.spellcheck_image(
+        "https://cdn/out.png", "", style_url="https://i.ibb.co/s.png")[
+        "ok"] is True
+    # no style reference -> replacedOk defaults true, no 3rd image
+    R.parsed = {"textOk": True, "personMatch": True, "readText": "",
+                "issues": []}
+    v = analysis.spellcheck_image("https://cdn/out.png", "")
+    assert v["ok"] is True and v["replacedOk"] is True
+    assert len(captured["input"]) == 1
+
+
+def test_pending_check_passes_style_url_to_qa(home, monkeypatch):
+    papi = _load_papi()
+    cid = store.create_creation(
+        "image-ad", "Style", "b", "c", status="generating",
+        source={"adCopy": "copy", "sourceUrl": "https://i.ibb.co/me.jpg",
+                "styleUrl": "https://i.ibb.co/winner.png",
+                "pending": [{"t": "tk", "p": "p", "r": 0}], "images": []})
+    monkeypatch.setattr(papi.kie, "check_task",
+                        lambda t: {"state": "success",
+                                   "url": "https://cdn/out.png"})
+    seen = {}
+
+    def fake_qa(url, copy, source_url="", style_url=""):
+        seen.update(source_url=source_url, style_url=style_url)
+        return {"ok": True, "issues": []}
+
+    monkeypatch.setattr(papi.analysis, "spellcheck_image", fake_qa)
+    papi.creations_check(papi.CreationBody(id=cid))
+    assert seen == {"source_url": "https://i.ibb.co/me.jpg",
+                    "style_url": "https://i.ibb.co/winner.png"}

@@ -490,6 +490,18 @@ _SPELLCHECK_SCHEMA = {
                                   "duplicated or mangled letters)"},
         "readText": {"type": "string",
                      "description": "the text exactly as rendered in the image"},
+        "replacedOk": {
+            "type": "boolean",
+            "description": "when a STYLE REFERENCE image was supplied: "
+                           "true ONLY if the generated ad is a NEW "
+                           "creative — the reference ad's original "
+                           "person/product/photography has been fully "
+                           "REPLACED by the user's source subject. False "
+                           "if the output is the style reference itself, "
+                           "a near-copy of it, or still shows the "
+                           "reference's original subject (instead of or "
+                           "alongside the user's). True when no style "
+                           "reference was supplied."},
         "personMatch": {
             "type": "boolean",
             "description": "when a reference portrait was supplied: true "
@@ -503,12 +515,13 @@ _SPELLCHECK_SCHEMA = {
                                   "shows a different individual than the "
                                   "reference portrait"},
     },
-    "required": ["textOk", "personMatch", "readText", "issues"],
+    "required": ["textOk", "replacedOk", "personMatch", "readText",
+                 "issues"],
 }
 
 
 def spellcheck_image(image_url: str, expected_copy: str = "",
-                     source_url: str = "") -> dict:
+                     source_url: str = "", style_url: str = "") -> dict:
     """Vision QA on a generated ad image: spelling always; when
     ``source_url`` is given (the user's portrait), also verify the ad
     shows that SAME person. Best-effort: raises only on LLM transport
@@ -529,6 +542,22 @@ def spellcheck_image(image_url: str, expected_copy: str = "",
     inputs = [{"type": "image", "url": image_url}]
     if (source_url or "").strip():
         inputs.append({"type": "image", "url": source_url.strip()})
+    style = ""
+    if (style_url or "").strip():
+        inputs.append({"type": "image", "url": style_url.strip()})
+        style = ("\n\nThe LAST image is the STYLE REFERENCE — the "
+                 "winning ad whose layout/mood was cloned. Its subject "
+                 "imagery must have been REPLACED: set replacedOk=false "
+                 "if the generated ad (first image) is essentially the "
+                 "reference ad itself, a near-copy of it, or still "
+                 "contains the reference's original person, product, or "
+                 "photography instead of (or alongside) the user's own "
+                 "subject. Matching layout, text placement, and mood is "
+                 "fine — reused subject imagery is not. Add an issue "
+                 "starting 'source not replaced:'. With no style "
+                 "reference supplied, set replacedOk=true.")
+    else:
+        style = "\n\nNo style reference was supplied — set replacedOk=true."
     import re
     res = _llm().complete_structured(
         instructions=(
@@ -536,7 +565,7 @@ def spellcheck_image(image_url: str, expected_copy: str = "",
             "rendered text. textOk=true only if all words are correctly "
             "spelled and cleanly legible — gibberish glyphs, mangled or "
             "duplicated letters, and misspellings all fail."
-            + expected + person),
+            + expected + person + style),
         input=inputs,
         json_schema=_SPELLCHECK_SCHEMA,
         schema_name="ad_spellcheck",
@@ -553,9 +582,11 @@ def spellcheck_image(image_url: str, expected_copy: str = "",
     if not isinstance(parsed, dict):
         raise RuntimeError("spellcheck returned nothing usable")
     person_ok = bool(parsed.get("personMatch", True))
-    return {"ok": bool(parsed.get("textOk")) and person_ok,
+    replaced_ok = bool(parsed.get("replacedOk", True))
+    return {"ok": bool(parsed.get("textOk")) and person_ok and replaced_ok,
             "textOk": bool(parsed.get("textOk")),
             "personOk": person_ok,
+            "replacedOk": replaced_ok,
             "readText": str(parsed.get("readText") or "")[:300],
             "issues": [str(i)[:120] for i in (parsed.get("issues") or [])][:5]}
 

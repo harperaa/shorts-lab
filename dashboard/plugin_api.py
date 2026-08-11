@@ -441,7 +441,8 @@ def asset(body: AssetBody):
     return {"ok": True, "assetId": aid}
 
 
-def _qa_pair(gen, ad_copy: str, source_spell: str = "") -> tuple:
+def _qa_pair(gen, ad_copy: str, source_spell: str = "",
+             style_spell: str = "") -> tuple:
     """Generate, spellcheck, regenerate up to twice on misspellings.
     `gen` returns (public_url, spellcheck_url) — plugin providers save
     local files, so the two can differ. Returns (public_url, warning);
@@ -451,7 +452,8 @@ def _qa_pair(gen, ad_copy: str, source_spell: str = "") -> tuple:
     for attempt in range(3):
         try:
             verdict = analysis.spellcheck_image(spell, ad_copy or "",
-                                                source_url=source_spell or "")
+                                                source_url=source_spell or "",
+                                                style_url=style_spell or "")
         except Exception:  # noqa: BLE001
             return public, ""
         if verdict["ok"]:
@@ -484,7 +486,8 @@ def _hermes_batch(jobs):
                     def gen(p=prompt):
                         return imagegen.import_result(
                             imagegen.hermes_generate(p, src_url, refs))
-                    url, warn = _qa_pair(gen, ad_copy, src_url or "")
+                    url, warn = _qa_pair(gen, ad_copy, src_url or "",
+                                         (refs[0] if refs else ""))
                     images.append(url)
                     if warn:
                         warns.append(warn)
@@ -1205,7 +1208,8 @@ def creations_check(body: CreationBody):
                 try:
                     verdict = analysis.spellcheck_image(
                         tick["url"], src0.get("adCopy") or "",
-                        source_url=src0.get("sourceUrl") or "")
+                        source_url=src0.get("sourceUrl") or "",
+                        style_url=src0.get("styleUrl") or "")
                 except Exception:  # noqa: BLE001
                     verdict = None
                 if verdict is not None and not verdict["ok"] \
@@ -1302,7 +1306,8 @@ def creations_check(body: CreationBody):
                 # fail open if the checker itself can't run
                 verdict = analysis.spellcheck_image(
                     tick["url"], src.get("adCopy") or "",
-                    source_url=src.get("sourceUrl") or "")
+                    source_url=src.get("sourceUrl") or "",
+                    style_url=src.get("styleUrl") or "")
             except Exception:  # noqa: BLE001
                 verdict = None
             if verdict is not None and not verdict["ok"] \
