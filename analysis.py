@@ -318,10 +318,11 @@ _AD_PROMPT_SCHEMA = {
             "items": {"type": "array", "items": {"type": "string"}},
             "description": ("for EVERY ad image (one entry per variant, "
                             "same order; a single entry when no variants): "
-                            "exactly 3 ad-copy takes — the line rendered in "
-                            "the image first, then two strong alternates "
-                            "the user can swap in, all derived from the "
-                            "winning copy's mechanics")},
+                            "exactly 4 ad-copy HEADLINE takes — the line "
+                            "rendered in the image first, then three "
+                            "strong alternates the user can choose from, "
+                            "all derived from the winning copy's "
+                            "mechanics, each a distinct angle")},
         "notes": {"type": "string",
                   "description": "one or two sentences: which mechanics of the winning copy were kept, and how each take varies it"},
     },
@@ -440,8 +441,8 @@ def build_ad_prompt(brief: str, ad_context: str = "",
         "The prompt must instruct: keep the source subject's identity "
         "faithful (face/product unchanged), adopt the reference's layout "
         "and styling, and render the ad copy text EXACTLY as given.\n"
-        "For every ad image also fill copyTakesPerVariant with exactly 3 "
-        "copy takes (rendered line first, two alternates) AND "
+        "For every ad image also fill copyTakesPerVariant with exactly 4 "
+        "headline takes (rendered line first, three alternates) AND "
         "postCopyVariants with exactly 3 {hook, content, cta} post-copy "
         "objects per ad image in variant order (the primary text "
         "published WITH the ad, derived from the winning ad's original "

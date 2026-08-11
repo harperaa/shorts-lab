@@ -547,6 +547,11 @@ _VISUAL_TAKES = [
     "shift), but give it a DIFFERENT look: new setting or backdrop "
     "treatment, different lighting mood and color grade. Same "
     "person/product identity.",
+    " ALTERNATE VISUAL TAKE — keep the exact same concept and the same "
+    "ad copy text (word for word, or with only the slightest wording "
+    "shift), but shoot it as a DRAMATIC CLOSE-UP: tight macro framing "
+    "on the subject or product detail, shallow depth of field, bolder "
+    "scale contrast. Same person/product identity.",
 ]
 
 
@@ -619,9 +624,9 @@ def adlab_generate(body: AdLabBody):
                 else plan.get("adCopy") or "")
             raw_takes = (take_sets[i] if i < len(take_sets) else None) or []
             takes = [analysis.strip_cta_label(t)[:300]
-                     for t in raw_takes if str(t).strip()][:3]
+                     for t in raw_takes if str(t).strip()][:4]
             if this_copy and this_copy not in takes:
-                takes = [this_copy[:300]] + takes[:2]
+                takes = [this_copy[:300]] + takes[:3]
             raw_posts = post_flat[i * 3:(i + 1) * 3] or post_flat[:3]
             posts = []
             for t in raw_posts[:3]:

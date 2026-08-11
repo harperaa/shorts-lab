@@ -284,8 +284,8 @@ def build_page(creations: list, images: dict) -> str:
                 f'<span class="txt">{_esc(t)}</span>'
                 f'<button class="copy" onclick="cp(this,{_esc_attr_js(t)})">'
                 f'⧉ copy</button></div>' for i, t in enumerate(takes))
-            takes_html = (f'<div class="takes"><h3>In-image headline takes'
-                          f'</h3>{rows}</div>')
+            takes_html = (f'<div class="takes"><h3>Headline options '
+                          f'&mdash; pick your favorite</h3>{rows}</div>')
         img_ext = images[cid].rsplit(".", 1)[-1]
         dl_name = _safe_filename(c["title"], img_ext)
         sections.append(f'''

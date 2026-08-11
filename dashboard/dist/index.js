@@ -2350,11 +2350,11 @@
                     borderColor: "color-mix(in srgb, var(--color-primary, #14b8a6) 60%, transparent)",
                     cursor: "pointer" }
                 : { cursor: "pointer" },
-              title: "Each concept renders as three visual takes — same " +
-                "copy, different angle, composition, and look — stacked " +
-                "on the card with per-take downloads",
+              title: "Each concept renders as four visual takes — same " +
+                "copy; different angle, look, and a dramatic close-up — " +
+                "stacked on the card with per-take downloads",
               onClick: function () { setVisual3(!visual3); } },
-            visual3 ? "🖼×3 visual takes" : "🖼×1 single take")),
+            visual3 ? "🖼×4 visual takes" : "🖼×1 single take")),
         h("textarea", {
           className: "sl-input", rows: 3, ref: briefRef,
           placeholder: BRIEF_PH[funnel] || BRIEF_PH.tof,
@@ -2835,6 +2835,34 @@
                                   h("span", { className: "sl-note",
                                       style: { flexShrink: 0 } }, "CTA"),
                                   h("span", { style: { flex: 1 } }, p.cta))
+                              : null,
+                            (c.copyTakes || []).length
+                              ? h("div", { style: { marginTop: 14 } },
+                                  h("div", { style: { fontWeight: 800,
+                                      fontSize: 13, marginBottom: 6 } },
+                                    "Headlines",
+                                    h("span", { className: "sl-note",
+                                        style: { fontWeight: 400,
+                                          marginLeft: 6 } },
+                                      "pick your favorite")),
+                                  c.copyTakes.map(function (t, j) {
+                                    return h("div", { key: j,
+                                        className: "sl-copytake" },
+                                      h("span", { className: "sl-note",
+                                          style: { flexShrink: 0 } },
+                                        (j + 1) + "."),
+                                      h("span", { style: { flex: 1 } }, t),
+                                      h("button", { className: "sl-btn",
+                                          style: { fontSize: 11,
+                                            padding: "2px 8px" },
+                                          title: "Copy this headline",
+                                          onClick: function () {
+                                            try {
+                                              navigator.clipboard
+                                                .writeText(t);
+                                            } catch (e2) {}
+                                          } }, "⧉"));
+                                  }))
                               : null);
                         })()
                       : (c.copyTakes || []).length
