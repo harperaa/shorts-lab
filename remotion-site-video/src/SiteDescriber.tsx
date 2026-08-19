@@ -251,33 +251,48 @@ export const SiteDescriber: React.FC<Props> = (props) => {
     }
   });
 
-  // Click cursor: during each scene transition a cursor glides to the
-  // center of the incoming region (viewport coords) and "clicks" with a
-  // ripple — paired with the click sfx.
+  // Click cursor: RIGHT BEFORE each transition, the cursor glides onto the
+  // NEXT scene's section as it appears in the LIVE camera view (so the
+  // click visibly lands ON the section being navigated to — and stays
+  // pinned to it as the camera starts moving), clicks (ripple + sfx),
+  // then the transition fires.
+  const CLICK_LEAD = 0.15;   // click this long before the scene boundary
+  const APPROACH = 0.8;      // cursor travel time before the click
   let cursor: { x: number; y: number; ripple: number; visible: boolean } = {
     x: 0, y: 0, ripple: 0, visible: false,
   };
   for (let i = 1; i < scenes.length; i++) {
     const b = starts[i];
-    if (t >= b - 0.6 && t <= b + 0.5) {
-      const toCam = camAt(scenes[i].region);
+    if (t >= b - APPROACH && t <= b + 0.35) {
+      const r = scenes[i].region;
+      // The section's position on screen RIGHT NOW (live camera): pin the
+      // click to the upper-center of the region — that's what a user
+      // would click — clamped into the visible viewport.
+      const rawX = (r.x + r.w / 2) * cam.scale + cam.tx;
+      const rawY = (r.y + Math.min(r.h * 0.2, 140)) * cam.scale + cam.ty;
       const target = {
-        x: (scenes[i].region.x + scenes[i].region.w / 2) * toCam.scale + toCam.tx,
-        y: Math.min(
-          (scenes[i].region.y + scenes[i].region.h / 2) * toCam.scale + toCam.ty,
-          vh - 40,
-        ),
+        x: Math.max(50, Math.min(vw - 50, rawX)),
+        y: Math.max(60, Math.min(vh - 60, rawY)),
       };
-      const approach = interpolate(t, [b - 0.6, b], [0, 1], {
+      const approach = interpolate(
+        t,
+        [b - APPROACH, b - CLICK_LEAD],
+        [0, 1],
+        {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+          easing: Easing.bezier(0.4, 0, 0.2, 1),
+        },
+      );
+      const fade = interpolate(t, [b + 0.15, b + 0.35], [1, 0], {
         extrapolateLeft: "clamp",
         extrapolateRight: "clamp",
-        easing: Easing.bezier(0.4, 0, 0.2, 1),
       });
       cursor = {
-        visible: true,
-        x: vw * 0.75 + (target.x - vw * 0.75) * approach,
-        y: vh * 0.85 + (target.y - vh * 0.85) * approach,
-        ripple: interpolate(t, [b, b + 0.45], [0, 1], {
+        visible: fade > 0,
+        x: vw * 0.72 + (target.x - vw * 0.72) * approach,
+        y: vh * 0.88 + (target.y - vh * 0.88) * approach,
+        ripple: interpolate(t, [b - CLICK_LEAD, b + 0.3], [0, 1], {
           extrapolateLeft: "clamp",
           extrapolateRight: "clamp",
         }),
@@ -561,7 +576,7 @@ export const SiteDescriber: React.FC<Props> = (props) => {
           {starts.slice(1).map((s0, i) => (
             <Sequence
               key={"c" + i}
-              from={Math.round(s0 * FPS)}
+              from={Math.max(0, Math.round((s0 - 0.15) * FPS))}
               durationInFrames={15}
             >
               <Audio src={sfxSrc("sfx-click.wav")} volume={0.8} />
