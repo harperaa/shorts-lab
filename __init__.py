@@ -25,6 +25,22 @@ _SHORTS_SEARCH_SCHEMA = {
 
 
 def register(ctx) -> None:
+    # Bundled skills → shorts-lab:<name> (the vendored official Remotion
+    # skill pack drives the Site Video build/render workers).
+    import logging
+    from pathlib import Path
+    _log = logging.getLogger(__name__)
+    skills_dir = Path(__file__).parent / "skills"
+    if skills_dir.is_dir():
+        for child in sorted(skills_dir.iterdir()):
+            skill_md = child / "SKILL.md"
+            if child.is_dir() and skill_md.exists():
+                try:
+                    ctx.register_skill(child.name, skill_md)
+                except Exception as exc:  # noqa: BLE001
+                    _log.warning("skill %s failed to register: %s",
+                                 child.name, exc)
+
     ctx.register_tool(
         name="shorts_search",
         toolset="shorts_lab",

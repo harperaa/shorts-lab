@@ -2915,7 +2915,264 @@
     ["content", "Shorts Lab"],
     ["adsresearch", "Ads Research"],
     ["adslab", "Ads Lab"],
+    ["sitevideo", "Site Video"],
   ];
+
+  // -------------------------------------------------------------------------
+  // Site Video — 60s Remotion describer videos for a URL.
+  // Plan (worker: screenshot + scenes) → preview/edit (camera math mirrored
+  // in CSS) → render (worker: remotion render) → download.
+  // -------------------------------------------------------------------------
+
+  // Same camera math as remotion-site-video/src/SiteDescriber.tsx.
+  function svCameraFor(region, vw, vh) {
+    var margin = 0.92;
+    var scale = Math.min(vw / region.w * margin, vh / region.h * margin, 3.5);
+    return {
+      scale: scale,
+      tx: vw / 2 - (region.x + region.w / 2) * scale,
+      ty: vh / 2 - (region.y + region.h / 2) * scale,
+    };
+  }
+
+  function SiteVideoPreview(props) {
+    // CSS approximation of the Remotion composition: plays the scenes with
+    // the same framing math over the captured screenshot.
+    var plan = props.plan;
+    var idxSt = useState(0);
+    var idx = idxSt[0], setIdx = idxSt[1];
+    var playSt = useState(false);
+    var playing = playSt[0], setPlaying = playSt[1];
+    useEffect(function () {
+      if (!playing || !plan || !plan.scenes || !plan.scenes.length) return undefined;
+      var s = plan.scenes[idx % plan.scenes.length];
+      var t = window.setTimeout(function () {
+        setIdx(function (i) { return (i + 1) % plan.scenes.length; });
+      }, Math.max(1500, (s.seconds || 5) * 1000));
+      return function () { window.clearTimeout(t); };
+    }, [playing, idx, plan]);
+    if (!plan || !plan.scenes || !plan.scenes.length) return null;
+    var vw = 640, vh = 360;
+    var scene = plan.scenes[Math.min(idx, plan.scenes.length - 1)];
+    var cam = svCameraFor(scene.region, vw, vh);
+    var shot = "/api/plugins/shorts-lab/sitevideo/file/" + props.projectId +
+      "/screenshot.png";
+    return h("div", { className: "sv-preview" },
+      h("div", { className: "sv-viewport", style: { width: vw, height: vh } },
+        h(AuthImg, {
+          src: shot,
+          style: {
+            position: "absolute",
+            width: plan.pageWidth,
+            transformOrigin: "0 0",
+            transform: "translate(" + cam.tx + "px," + cam.ty + "px) scale(" + cam.scale + ")",
+            transition: "transform 0.8s cubic-bezier(0.33,1,0.68,1)",
+          },
+        }),
+        h("div", { className: "sv-caption" },
+          scene.headline ? h("span", { className: "sv-chip" }, scene.headline) : null,
+          h("span", null, scene.caption))),
+      h("div", { className: "sv-preview-controls" },
+        h("button", { className: "sl-btn",
+          onClick: function () { setPlaying(!playing); } },
+          playing ? "⏸ Pause" : "▶ Play scenes"),
+        plan.scenes.map(function (s, i) {
+          return h("button", {
+            key: i,
+            className: "sl-tab" + (i === idx ? " sl-tab-on" : ""),
+            onClick: function () { setPlaying(false); setIdx(i); },
+            title: s.caption,
+          }, String(i + 1));
+        })));
+  }
+
+  function SiteVideoTab() {
+    var stSt = useState(null);
+    var st = stSt[0], setSt = stSt[1];
+    var urlSt = useState("");
+    var url = urlSt[0], setUrl = urlSt[1];
+    var selSt = useState(null);
+    var sel = selSt[0], setSel = selSt[1];
+    var planSt = useState(null); // editable copy of selected project's plan
+    var plan = planSt[0], setPlan = planSt[1];
+    var busySt = useState("");
+    var busy = busySt[0], setBusy = busySt[1];
+
+    var load = useCallback(function () {
+      api("/sitevideo/state").then(function (d) {
+        setSt(d);
+        if (d && !url) setUrl(d.defaultUrl || "");
+      }).catch(function () {});
+    }, [url]);
+    useEffect(function () { load(); }, []);
+
+    var anyOpen = !!(st && (st.projects || []).some(function (p) {
+      return p.planStatus === "open" || p.renderStatus === "open";
+    }));
+    useEffect(function () {
+      if (!anyOpen) return undefined;
+      var id = window.setInterval(load, 15000);
+      return function () { window.clearInterval(id); };
+    }, [anyOpen, load]);
+
+    var selected = (st && (st.projects || []).filter(function (p) {
+      return p.id === sel;
+    })[0]) || null;
+    useEffect(function () {
+      setPlan(selected && selected.plan
+        ? JSON.parse(JSON.stringify(selected.plan)) : null);
+    }, [sel, selected && selected.hasPlan]);
+
+    function err(e) { alert(String((e && e.message) || e)); }
+
+    function startPlan() {
+      setBusy("plan");
+      api("/sitevideo/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: url }),
+      }).then(function (d) { setBusy(""); setSel(d.projectId); load(); })
+        .catch(function (e) { setBusy(""); err(e); });
+    }
+
+    function savePlan() {
+      if (!plan || !selected) return;
+      setBusy("save");
+      api("/sitevideo/plan", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: selected.id, plan: plan }),
+      }).then(function () { setBusy(""); load(); })
+        .catch(function (e) { setBusy(""); err(e); });
+    }
+
+    function startRender() {
+      if (!selected) return;
+      setBusy("render");
+      api("/sitevideo/render", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: selected.id }),
+      }).then(function () { setBusy(""); load(); })
+        .catch(function (e) { setBusy(""); err(e); });
+    }
+
+    function setScene(i, key, val) {
+      setPlan(function (p) {
+        var copy = JSON.parse(JSON.stringify(p));
+        if (key.indexOf("region.") === 0) {
+          copy.scenes[i].region[key.slice(7)] = Number(val) || 0;
+        } else if (key === "seconds") {
+          copy.scenes[i].seconds = Math.max(1, Number(val) || 5);
+        } else {
+          copy.scenes[i][key] = val;
+        }
+        return copy;
+      });
+    }
+
+    function statusChip(label, status, session) {
+      if (!status) return null;
+      var txt = label + ": " + status;
+      return h("span", {
+        className: "sv-status sv-status-" + status,
+        title: txt,
+      }, status === "open" ? label + "…" : txt,
+        session ? h("a", {
+          className: "sl-link", style: { marginLeft: 6 },
+          href: "/chat?resume=" + encodeURIComponent(session),
+          onClick: function (e) {
+            e.preventDefault();
+            window.location.assign("/chat?resume=" + encodeURIComponent(session));
+          },
+        }, "chat ↗") : null);
+    }
+
+    var totalSecs = plan ? plan.scenes.reduce(function (a, s) {
+      return a + (Number(s.seconds) || 0);
+    }, 0) : 0;
+
+    return h("div", { className: "sl-card" },
+      h("h2", null, "🎬 Site Video"),
+      h("p", { className: "sl-muted" },
+        "A 60-second describer video for any site: the AI reviews the page, ",
+        "writes a multi-phase script, and the camera pans and zooms across ",
+        "the sections it describes — built with Remotion, rendered to MP4."),
+      h("div", { className: "sv-row" },
+        h("input", {
+          className: "sv-url",
+          value: url,
+          placeholder: "https://your-site.com",
+          onChange: function (e) { setUrl(e.target.value); },
+        }),
+        h("button", {
+          className: "sl-btn sl-btn-primary",
+          disabled: busy === "plan" || !url.trim(),
+          onClick: startPlan,
+        }, busy === "plan" ? "Starting…" : "🎬 Plan video")),
+      st && (st.projects || []).length
+        ? h("div", { className: "sv-projects" },
+            (st.projects || []).map(function (p) {
+              return h("div", {
+                key: p.id,
+                className: "sv-project" + (sel === p.id ? " sv-project-on" : ""),
+                onClick: function () { setSel(p.id); },
+              },
+                h("span", { className: "sv-project-url" }, p.url),
+                statusChip("planning", p.planStatus, p.planSession),
+                statusChip("rendering", p.renderStatus, p.renderSession),
+                p.hasRender ? h("span", { className: "sv-status sv-status-done" }, "video ✓") : null);
+            }))
+        : h("p", { className: "sl-muted" }, "No site videos yet — enter a URL and plan one."),
+      selected && plan ? h("div", { className: "sv-editor" },
+        h(SiteVideoPreview, { key: selected.id, plan: plan, projectId: selected.id }),
+        h("div", { className: "sv-scenes" },
+          h("h3", null, "Scenes (" + plan.scenes.length + " · " +
+            Math.round(totalSecs) + "s + intro/outro)"),
+          plan.scenes.map(function (s, i) {
+            return h("div", { key: i, className: "sv-scene" },
+              h("div", { className: "sv-scene-row" },
+                h("input", { className: "sv-in sv-in-head", value: s.headline || "",
+                  placeholder: "Headline",
+                  onChange: function (e) { setScene(i, "headline", e.target.value); } }),
+                h("input", { className: "sv-in sv-in-sec", value: s.seconds,
+                  title: "Seconds", type: "number", min: 1, max: 30,
+                  onChange: function (e) { setScene(i, "seconds", e.target.value); } })),
+              h("textarea", { className: "sv-in sv-in-cap", value: s.caption,
+                onChange: function (e) { setScene(i, "caption", e.target.value); } }),
+              h("div", { className: "sv-scene-row" },
+                ["x", "y", "w", "h"].map(function (k) {
+                  return h("label", { key: k, className: "sv-reg" }, k,
+                    h("input", { className: "sv-in sv-in-num",
+                      value: s.region[k], type: "number",
+                      onChange: function (e) { setScene(i, "region." + k, e.target.value); } }));
+                })));
+          }),
+          h("div", { className: "sv-actions" },
+            h("button", { className: "sl-btn",
+              disabled: busy === "save", onClick: savePlan },
+              busy === "save" ? "Saving…" : "Save plan"),
+            h("button", {
+              className: "sl-btn sl-btn-primary",
+              disabled: busy === "render" || selected.renderStatus === "open",
+              title: "Render the MP4 with Remotion (runs as a worker task)",
+              onClick: startRender,
+            }, selected.renderStatus === "open" ? "Rendering…"
+              : busy === "render" ? "Starting…" : "🎞 Render video"),
+            selected.hasRender ? h("button", { className: "sl-btn",
+              onClick: function () {
+                downloadFile("/sitevideo/file/" + selected.id + "/render.mp4",
+                  selected.id + ".mp4").catch(err);
+              } }, "⬇ Download MP4") : null,
+            selected.hasRender ? h("span", { className: "sl-muted",
+              style: { fontSize: 12 } },
+              Math.round((selected.renderBytes || 0) / 1048576) + " MB") : null)))
+      : selected && selected.planStatus === "open"
+        ? h("p", { className: "sl-muted" },
+            "The worker is reviewing the site and writing the scene plan — "
+            + "this panel fills in when the plan lands (about 3-6 minutes).")
+        : null);
+  }
 
   function ShortsLabPage() {
     var stSt = useState(null);
@@ -3023,8 +3280,10 @@
                     setAdStyleUrl(payload.styleImage || "");
                     pickTab("adslab");
                   } })
-              : h(AdLabTabWrap, { st: st, onState: setSt,
-                  adContext: adContext, adStyleUrl: adStyleUrl })));
+              : tab === "sitevideo"
+                ? h(SiteVideoTab)
+                : h(AdLabTabWrap, { st: st, onState: setSt,
+                    adContext: adContext, adStyleUrl: adStyleUrl })));
   }
 
   window.__HERMES_PLUGINS__.register("shorts-lab", ShortsLabPage);

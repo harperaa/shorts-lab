@@ -56,8 +56,69 @@ recipes = importlib.import_module(f"{_PKG}.recipes")
 meta_publish = importlib.import_module(f"{_PKG}.meta_publish")
 sync_job = importlib.import_module(f"{_PKG}.sync_job")
 analysis = importlib.import_module(f"{_PKG}.analysis")
+sitevideo = importlib.import_module(f"{_PKG}.sitevideo")
 
 router = APIRouter()
+
+
+# ---------------------------------------------------------------------------
+# Site Video — 60s Remotion describer videos for a URL
+# ---------------------------------------------------------------------------
+
+class SiteVideoPlanBody(BaseModel):
+    url: str
+
+
+@router.get("/sitevideo/state")
+def get_sitevideo_state():
+    return sitevideo.public_state()
+
+
+@router.post("/sitevideo/plan")
+def post_sitevideo_plan(body: SiteVideoPlanBody):
+    result = sitevideo.start_plan(body.url)
+    if result.get("error"):
+        raise HTTPException(400, result["error"])
+    return result
+
+
+class SiteVideoRenderBody(BaseModel):
+    projectId: str
+
+
+@router.post("/sitevideo/render")
+def post_sitevideo_render(body: SiteVideoRenderBody):
+    result = sitevideo.start_render(body.projectId)
+    if result.get("error"):
+        raise HTTPException(400, result["error"])
+    return result
+
+
+class SiteVideoPlanSave(BaseModel):
+    projectId: str
+    plan: dict
+
+
+@router.put("/sitevideo/plan")
+def put_sitevideo_plan(body: SiteVideoPlanSave):
+    result = sitevideo.save_plan(body.projectId, body.plan)
+    if result.get("error"):
+        raise HTTPException(400, result["error"])
+    return result
+
+
+@router.get("/sitevideo/file/{project_id}/{name}")
+def get_sitevideo_file(project_id: str, name: str):
+    p = sitevideo.project_file(project_id, name)
+    if p is None:
+        raise HTTPException(404, "no such artifact")
+    import mimetypes as _mt
+    media = _mt.guess_type(p.name)[0] or "application/octet-stream"
+    try:
+        from fastapi.responses import FileResponse
+        return FileResponse(str(p), media_type=media, filename=p.name)
+    except ImportError:  # pragma: no cover
+        raise HTTPException(500, "fastapi unavailable")
 
 _SYNC_STALE_SECONDS = 600
 
