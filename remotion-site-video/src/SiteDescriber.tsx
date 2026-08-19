@@ -41,7 +41,9 @@ const sceneSchema = z.object({
 });
 
 const effectsSchema = z.object({
-  transition: z.enum(["glide", "flash", "fade"]).default("flash"),
+  transition: z
+    .enum(["mix", "flash", "whip", "zoom", "fade", "glide"])
+    .default("mix"),
   sfx: z.boolean().default(true),
   particles: z.boolean().default(true),
 });
@@ -84,13 +86,28 @@ export function cameraFor(
   pageH: number,
 ): { scale: number; tx: number; ty: number } {
   const margin = 0.94;
-  const scale = Math.min(
-    (viewportW / region.w) * margin,
-    (viewportH / region.h) * margin,
-    3.5, // never zoom past 3.5x — screenshots get blurry
+  // Zoom floor 1.0: the app must always read at 100%+ — a region larger
+  // than the viewport gets framed at 100% from its top edge (the camera
+  // pans it), never zoomed out into unreadable miniature.
+  const scale = Math.max(
+    1,
+    Math.min(
+      (viewportW / region.w) * margin,
+      (viewportH / region.h) * margin,
+      3.5, // never zoom past 3.5x — screenshots get blurry
+    ),
   );
-  const cx = region.x + region.w / 2;
-  const cy = region.y + region.h / 2;
+  // Anchor to the region's LEFT edge when it is wider than the viewport at
+  // this scale (web content reads from the left), and to its TOP when
+  // taller (readers scan from the top); otherwise center.
+  const regionWiderThanView = region.w * scale > viewportW;
+  const cx = regionWiderThanView
+    ? region.x + viewportW / (2 * scale)
+    : region.x + region.w / 2;
+  const regionTallerThanView = region.h * scale > viewportH;
+  const cy = regionTallerThanView
+    ? region.y + viewportH / (2 * scale)
+    : region.y + region.h / 2;
   let tx = viewportW / 2 - cx * scale;
   let ty = viewportH / 2 - cy * scale;
   const scaledW = pageW * scale;
@@ -126,8 +143,8 @@ export const SiteDescriber: React.FC<Props> = (props) => {
   const outroStart = acc;
 
   // ---- layout ------------------------------------------------------------
-  const viewportPad = (vertical ? 44 : 90) * k;
-  const captionBand = (height > width * 1.4 ? 320 : vertical ? 220 : 120) * k;
+  const viewportPad = (vertical ? 22 : 60) * k;
+  const captionBand = (height > width * 1.4 ? 250 : vertical ? 190 : 110) * k;
   const chrome = (vertical ? 54 : 46) * k;
   const vw = width - viewportPad * 2;
   const vh = height - viewportPad * 2 - captionBand - chrome;
@@ -178,10 +195,18 @@ export const SiteDescriber: React.FC<Props> = (props) => {
   // flash: quick white pulse; fade: dip to black. Applied around every
   // scene start (and the outro start).
   const boundaries = [...starts, outroStart];
+  const kindFor = (i: number): string => {
+    if (effects.transition === "mix")
+      return ["flash", "whip", "zoom"][i % 3];
+    return effects.transition;
+  };
   let flashOpacity = 0;
   let fadeOpacity = 0;
-  for (const b of boundaries) {
-    if (effects.transition === "flash") {
+  let whipBlur = 0;
+  let punchZoom = 0;
+  boundaries.forEach((b, i) => {
+    const kind = kindFor(i);
+    if (kind === "flash") {
       flashOpacity = Math.max(
         flashOpacity,
         interpolate(t, [b - 0.06, b, b + 0.3], [0, 0.8, 0], {
@@ -189,7 +214,7 @@ export const SiteDescriber: React.FC<Props> = (props) => {
           extrapolateRight: "clamp",
         }),
       );
-    } else if (effects.transition === "fade") {
+    } else if (kind === "fade") {
       fadeOpacity = Math.max(
         fadeOpacity,
         interpolate(t, [b - 0.35, b, b + 0.35], [0, 0.85, 0], {
@@ -197,6 +222,57 @@ export const SiteDescriber: React.FC<Props> = (props) => {
           extrapolateRight: "clamp",
         }),
       );
+    } else if (kind === "whip") {
+      whipBlur = Math.max(
+        whipBlur,
+        interpolate(t, [b - 0.18, b, b + 0.22], [0, 14, 0], {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+        }),
+      );
+    } else if (kind === "zoom") {
+      punchZoom = Math.max(
+        punchZoom,
+        interpolate(t, [b - 0.12, b, b + 0.28], [0, 0.06, 0], {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+        }),
+      );
+    }
+  });
+
+  // Click cursor: during each scene transition a cursor glides to the
+  // center of the incoming region (viewport coords) and "clicks" with a
+  // ripple — paired with the click sfx.
+  let cursor: { x: number; y: number; ripple: number; visible: boolean } = {
+    x: 0, y: 0, ripple: 0, visible: false,
+  };
+  for (let i = 1; i < scenes.length; i++) {
+    const b = starts[i];
+    if (t >= b - 0.6 && t <= b + 0.5) {
+      const toCam = camAt(scenes[i].region);
+      const target = {
+        x: (scenes[i].region.x + scenes[i].region.w / 2) * toCam.scale + toCam.tx,
+        y: Math.min(
+          (scenes[i].region.y + scenes[i].region.h / 2) * toCam.scale + toCam.ty,
+          vh - 40,
+        ),
+      };
+      const approach = interpolate(t, [b - 0.6, b], [0, 1], {
+        extrapolateLeft: "clamp",
+        extrapolateRight: "clamp",
+        easing: Easing.bezier(0.4, 0, 0.2, 1),
+      });
+      cursor = {
+        visible: true,
+        x: vw * 0.75 + (target.x - vw * 0.75) * approach,
+        y: vh * 0.85 + (target.y - vh * 0.85) * approach,
+        ripple: interpolate(t, [b, b + 0.45], [0, 1], {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+        }),
+      };
+      break;
     }
   }
 
@@ -318,9 +394,51 @@ export const SiteDescriber: React.FC<Props> = (props) => {
                 position: "absolute",
                 width: props.pageWidth,
                 transformOrigin: "0 0",
-                transform: `translate(${cam.tx}px, ${cam.ty}px) scale(${cam.scale})`,
+                transform: `translate(${cam.tx}px, ${cam.ty}px) scale(${
+                  cam.scale * (1 + punchZoom)
+                })`,
+                filter: whipBlur > 0.5 ? `blur(${whipBlur}px)` : undefined,
               }}
             />
+            {cursor.visible ? (
+              <div
+                style={{
+                  position: "absolute",
+                  left: cursor.x,
+                  top: cursor.y,
+                  zIndex: 5,
+                  pointerEvents: "none",
+                }}
+              >
+                {cursor.ripple > 0 && cursor.ripple < 1 ? (
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: -30 * cursor.ripple * k,
+                      top: -30 * cursor.ripple * k,
+                      width: 60 * cursor.ripple * k,
+                      height: 60 * cursor.ripple * k,
+                      borderRadius: "50%",
+                      border: `${3 * k}px solid ${props.accent}`,
+                      opacity: 1 - cursor.ripple,
+                    }}
+                  />
+                ) : null}
+                <svg
+                  width={30 * k}
+                  height={30 * k}
+                  viewBox="0 0 24 24"
+                  style={{ filter: "drop-shadow(0 2px 6px rgba(0,0,0,0.6))" }}
+                >
+                  <path
+                    d="M5 3l14 8-6 1.5L16.5 19l-3 1.3L10 14l-5 4z"
+                    fill="#ffffff"
+                    stroke="#0b0f17"
+                    strokeWidth="1.4"
+                  />
+                </svg>
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -427,7 +545,16 @@ export const SiteDescriber: React.FC<Props> = (props) => {
               from={Math.round((s0 - 0.12) * FPS)}
               durationInFrames={Math.round(0.5 * FPS)}
             >
-              <Audio src={sfxSrc("sfx-whoosh.wav")} volume={0.55} />
+              <Audio src={sfxSrc("sfx-whoosh.wav")} volume={0.5} />
+            </Sequence>
+          ))}
+          {starts.slice(1).map((s0, i) => (
+            <Sequence
+              key={"c" + i}
+              from={Math.round(s0 * FPS)}
+              durationInFrames={15}
+            >
+              <Audio src={sfxSrc("sfx-click.wav")} volume={0.8} />
             </Sequence>
           ))}
           <Sequence from={Math.round(outroStart * FPS)} durationInFrames={20}>

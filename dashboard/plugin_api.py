@@ -108,6 +108,36 @@ def put_sitevideo_plan(body: SiteVideoPlanSave):
     return result
 
 
+class SiteVideoReplanBody(BaseModel):
+    projectId: str
+    instructions: str = ""
+
+
+@router.post("/sitevideo/replan")
+def post_sitevideo_replan(body: SiteVideoReplanBody):
+    result = sitevideo.start_replan(body.projectId, body.instructions)
+    if result.get("error"):
+        raise HTTPException(400, result["error"])
+    return result
+
+
+class SiteVideoStudioBody(BaseModel):
+    projectId: str
+
+
+@router.post("/sitevideo/studio")
+def post_sitevideo_studio(body: SiteVideoStudioBody):
+    result = sitevideo.start_studio(body.projectId)
+    if result.get("error"):
+        raise HTTPException(400, result["error"])
+    return result
+
+
+@router.get("/sitevideo/studio-status")
+def get_sitevideo_studio_status():
+    return sitevideo.studio_status()
+
+
 @router.get("/sitevideo/file/{project_id}/{name}")
 def get_sitevideo_file(project_id: str, name: str):
     p = sitevideo.project_file(project_id, name)

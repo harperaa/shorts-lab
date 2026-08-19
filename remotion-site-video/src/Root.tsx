@@ -6,6 +6,9 @@ import {
   FPS,
   FORMATS,
 } from "./SiteDescriber";
+// Studio sessions stage the active project's plan here (start_studio);
+// ships as `null` — the fallback DEFAULTS below apply outside Studio.
+import planProps from "./plan-props.json";
 
 const DEFAULTS = {
   title: "Site Tour",
@@ -36,7 +39,7 @@ export const Root: React.FC = () => {
       height={FORMATS.vertical.height}
       fps={FPS}
       durationInFrames={60 * FPS}
-      defaultProps={DEFAULTS}
+      defaultProps={(planProps as unknown as typeof DEFAULTS) ?? DEFAULTS}
       calculateMetadata={({ props }) => {
         const INTRO = 2.5;
         const OUTRO = 4;

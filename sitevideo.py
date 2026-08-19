@@ -364,6 +364,101 @@ def start_plan(url: str, video_format: str = "vertical") -> dict[str, Any]:
     return {"ok": True, "projectId": pid, "taskId": task_id}
 
 
+def start_replan(project_id: str, instructions: str = "") -> dict[str, Any]:
+    """Redo the plan for an existing project, steered by user instructions.
+    The worker keeps the captured screenshot/page.json and revises plan.json."""
+    state = load_state()
+    proj = state["projects"].get(project_id)
+    if not proj:
+        return {"error": f"unknown project: {project_id}"}
+    project_dir = Path(proj["dir"])
+    workdir = sitevideo_dir() / "_workdir"
+    url = proj.get("url") or ""
+    fmt = proj.get("format") or "vertical"
+    instructions = (instructions or "").strip()[:2000]
+    extra = "\n".join([
+        "",
+        "### RE-PLAN: this project already has a plan — revise it",
+        f"The current plan is at {project_dir}/plan.json and the capture",
+        "(screenshot.png + page.json) already exists — reuse them; only",
+        "re-run scripts/screenshot.mjs if screenshot.png is missing.",
+        "The user's revision instructions (HIGHEST priority):",
+        "```",
+        instructions or "(none given — improve scene framing and captions)",
+        "```",
+        "Keep what the instructions don't touch; fix what they do. Regions",
+        "must render at 100% zoom or closer — prefer viewport-shaped",
+        "sections (for this format, height ≈ width × viewport aspect),",
+        "never a full-page region.",
+    ])
+    try:
+        task_id = _create_task(
+            f"Site Video re-plan: {url[:56]}",
+            build_plan_brief(url, project_dir, workdir, fmt) + extra,
+            PLAN_SKILLS)
+    except RuntimeError as exc:
+        return {"error": str(exc)}
+    proj["planTaskId"] = task_id
+    proj["planCreatedAt"] = _now_iso()
+    save_state(state)
+    return {"ok": True, "taskId": task_id}
+
+
+# ---------------------------------------------------------------------------
+# Remotion Studio (the full editor) — managed local process
+# ---------------------------------------------------------------------------
+
+STUDIO_PORT = 3333
+
+
+def studio_status() -> dict[str, Any]:
+    import socket
+    with socket.socket() as sock:
+        sock.settimeout(0.3)
+        running = sock.connect_ex(("127.0.0.1", STUDIO_PORT)) == 0
+    return {"running": running, "port": STUDIO_PORT,
+            "url": f"http://localhost:{STUDIO_PORT}"}
+
+
+def start_studio(project_id: str) -> dict[str, Any]:
+    """Launch Remotion Studio on the cached workdir with this project's
+    plan wired in as the composition's default props (via plan-props.json).
+    Local-instance feature: Studio binds its own port, so on a hosted
+    deployment the port must be exposed for the tab to reach it."""
+    import shutil
+    import subprocess
+    state = load_state()
+    proj = state["projects"].get(project_id)
+    if not proj:
+        return {"error": f"unknown project: {project_id}"}
+    project_dir = Path(proj["dir"])
+    plan_path = project_dir / "plan.json"
+    if not plan_path.exists():
+        return {"error": "no plan.json yet — generate the plan first"}
+    workdir = sitevideo_dir() / "_workdir"
+    if not (workdir / "package.json").exists():
+        return {"error": "workdir not set up yet — run a plan or render "
+                         "once first (it installs the Remotion project)"}
+    # stage plan + screenshot for the studio session
+    plan = json.loads(plan_path.read_text())
+    (workdir / "public").mkdir(exist_ok=True)
+    shot = project_dir / "screenshot.png"
+    if shot.exists():
+        shutil.copy(shot, workdir / "public" / f"{project_dir.name}.png")
+        plan["screenshot"] = f"{project_dir.name}.png"
+    (workdir / "src" / "plan-props.json").write_text(
+        json.dumps(plan, indent=1))
+    if studio_status()["running"]:
+        return {"ok": True, **studio_status(), "already": True}
+    log = open(sitevideo_dir() / "studio.log", "a")
+    subprocess.Popen(
+        ["npx", "remotion", "studio", "--port", str(STUDIO_PORT),
+         "--no-open"],
+        cwd=str(workdir), stdout=log, stderr=log,
+        start_new_session=True)
+    return {"ok": True, **studio_status(), "starting": True}
+
+
 def start_render(project_id: str) -> dict[str, Any]:
     state = load_state()
     proj = state["projects"].get(project_id)

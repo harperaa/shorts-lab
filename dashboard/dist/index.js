@@ -2945,6 +2945,8 @@
   function SiteVideoPreview(props) {
     var plan = props.plan;
     var hostRef = useRef(null);
+    var sizeSt = useState("m");
+    var psize = sizeSt[0], setPsize = sizeSt[1];
     var shotSt = useState(null);   // blob: URL of the authed screenshot
     var shot = shotSt[0], setShot = shotSt[1];
     var errSt = useState(null);
@@ -2993,10 +2995,21 @@
     if (!plan || !plan.scenes || !plan.scenes.length) return null;
     var vertical = plan.format !== "landscape" && plan.format !== "landscape4k";
     return h("div", { className: "sv-preview" },
+      h("div", { className: "sv-preview-controls" },
+        ["s", "m", "l"].map(function (z) {
+          return h("button", {
+            key: z,
+            className: "sl-tab" + (psize === z ? " sl-tab-on" : ""),
+            onClick: function () { setPsize(z); },
+          }, z.toUpperCase());
+        }),
+        h("span", { className: "sl-muted", style: { fontSize: 11.5 } },
+          "player size — fullscreen via the player's own control")),
       perr ? h("p", { className: "sl-muted" }, "Preview unavailable: " + perr)
         : h("div", {
             ref: hostRef,
-            className: "sv-player " + (vertical ? "sv-player-v" : "sv-player-h"),
+            className: "sv-player sv-player-" + psize + " " +
+              (vertical ? "sv-player-v" : "sv-player-h"),
           }));
   }
 
@@ -3046,6 +3059,10 @@
     var busy = busySt[0], setBusy = busySt[1];
     var fmtSt = useState("vertical");
     var fmt = fmtSt[0], setFmt = fmtSt[1];
+    var replanSt = useState(false);
+    var replanOpen = replanSt[0], setReplanOpen = replanSt[1];
+    var replanTextSt = useState("");
+    var replanText = replanTextSt[0], setReplanText = replanTextSt[1];
 
     var load = useCallback(function () {
       api("/sitevideo/state").then(function (d) {
@@ -3097,6 +3114,42 @@
         body: JSON.stringify({ projectId: selected.id, plan: plan }),
       }).then(function () { setBusy(""); load(); })
         .catch(function (e) { setBusy(""); err(e); });
+    }
+
+    function startReplan() {
+      if (!selected) return;
+      setBusy("replan");
+      api("/sitevideo/replan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: selected.id,
+                               instructions: replanText }),
+      }).then(function () {
+        setBusy(""); setReplanOpen(false); setReplanText(""); load();
+      }).catch(function (e) { setBusy(""); err(e); });
+    }
+
+    function openStudio() {
+      if (!selected) return;
+      setBusy("studio");
+      api("/sitevideo/studio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: selected.id }),
+      }).then(function (d) {
+        setBusy("");
+        var url = d.url || "http://localhost:3333";
+        var tries = 0;
+        (function waitUp() {
+          api("/sitevideo/studio-status").then(function (st2) {
+            if (st2.running) { window.open(url, "_blank"); return; }
+            if (tries++ < 20) window.setTimeout(waitUp, 1500);
+            else alert("Studio did not come up — check studio.log");
+          }).catch(function () {
+            if (tries++ < 20) window.setTimeout(waitUp, 1500);
+          });
+        })();
+      }).catch(function (e) { setBusy(""); err(e); });
     }
 
     function startRender() {
@@ -3232,9 +3285,12 @@
                 });
               },
             },
+              h("option", { value: "mix" }, "Mix (flash/whip/zoom)"),
               h("option", { value: "flash" }, "Flash"),
-              h("option", { value: "glide" }, "Glide only"),
-              h("option", { value: "fade" }, "Fade")),
+              h("option", { value: "whip" }, "Whip pan"),
+              h("option", { value: "zoom" }, "Zoom punch"),
+              h("option", { value: "fade" }, "Fade"),
+              h("option", { value: "glide" }, "Glide only")),
             ["sfx", "particles"].map(function (k) {
               var on = !plan.effects || plan.effects[k] !== false;
               return h("label", { key: k, className: "sv-reg" },
@@ -3275,7 +3331,19 @@
               title: "Render the MP4 with Remotion (runs as a worker task)",
               onClick: startRender,
             }, selected.renderStatus === "open" ? "Rendering…"
-              : busy === "render" ? "Starting…" : "🎞 Render video"),
+              : busy === "render" ? "Starting…"
+              : selected.hasRender ? "🎞 Re-render" : "🎞 Render video"),
+            h("button", { className: "sl-btn",
+              disabled: selected.planStatus === "open",
+              title: "Redo the plan for this video with your instructions",
+              onClick: function () { setReplanOpen(!replanOpen); },
+            }, selected.planStatus === "open" ? "Re-planning…" : "↻ Re-plan"),
+            h("button", { className: "sl-btn",
+              disabled: busy === "studio",
+              title: "Open this plan in the full Remotion Studio editor "
+                + "(local instance — Studio runs on its own port)",
+              onClick: openStudio,
+            }, busy === "studio" ? "Launching…" : "🎛 Remotion Studio"),
             selected.hasRender ? h("button", { className: "sl-btn",
               onClick: function () {
                 downloadFile("/sitevideo/file/" + selected.id + "/render.mp4",
@@ -3283,7 +3351,16 @@
               } }, "⬇ Download MP4") : null,
             selected.hasRender ? h("span", { className: "sl-muted",
               style: { fontSize: 12 } },
-              Math.round((selected.renderBytes || 0) / 1048576) + " MB") : null)))
+              Math.round((selected.renderBytes || 0) / 1048576) + " MB") : null),
+          replanOpen ? h("div", { className: "sv-replan" },
+            h("textarea", { className: "sv-in sv-in-cap",
+              value: replanText,
+              placeholder: "Instructions for the re-plan — e.g. zoom into the pricing table longer, skip the footer, punchier captions…",
+              onChange: function (e) { setReplanText(e.target.value); } }),
+            h("button", { className: "sl-btn sl-btn-primary",
+              disabled: busy === "replan",
+              onClick: startReplan },
+              busy === "replan" ? "Starting…" : "Re-plan with instructions")) : null))
       : selected && selected.planStatus === "open"
         ? h("p", { className: "sl-muted" },
             "The worker is reviewing the site and writing the scene plan — "

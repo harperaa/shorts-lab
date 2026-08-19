@@ -354,3 +354,11 @@
 .sv-player { border-radius: 10px; overflow: hidden; border: 1px solid var(--color-border); background: #000; }
 .sv-player-h { width: 640px; height: 360px; }
 .sv-player-v { width: 320px; height: 568px; }
+
+.sv-replan { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.sv-player-s.sv-player-v { width: 240px; height: 426px; }
+.sv-player-m.sv-player-v { width: 320px; height: 568px; }
+.sv-player-l.sv-player-v { width: 420px; height: 746px; }
+.sv-player-s.sv-player-h { width: 480px; height: 270px; }
+.sv-player-m.sv-player-h { width: 640px; height: 360px; }
+.sv-player-l.sv-player-h { width: 860px; height: 484px; }
