@@ -2986,6 +2986,39 @@
         })));
   }
 
+  function SvSteps(props) {
+    // The pipeline at a glance: Plan → Edit → Render → Download.
+    var p = props.project;
+    var steps = [
+      { label: "1 · Plan",
+        state: p.hasPlan ? "done"
+          : p.planStatus === "open" ? "busy"
+          : p.planStatus === "done" ? "failed" : "pending",
+        note: p.planStatus === "open" ? "AI is reviewing the site…"
+          : (!p.hasPlan && p.planStatus === "done")
+            ? "finished without a plan — open chat" : "" },
+      { label: "2 · Edit scenes",
+        state: !p.hasPlan ? "pending" : p.hasRender ? "done" : "busy",
+        note: p.hasPlan && !p.hasRender ? "review captions + regions below" : "" },
+      { label: "3 · Render",
+        state: p.hasRender ? "done"
+          : p.renderStatus === "open" ? "busy" : "pending",
+        note: p.renderStatus === "open" ? "Remotion is rendering (~3-6 min)…" : "" },
+      { label: "4 · Download",
+        state: p.hasRender ? "busy" : "pending",
+        note: p.hasRender ? "your MP4 is ready below" : "" },
+    ];
+    return h("div", { className: "sv-steps" },
+      steps.map(function (st, i) {
+        return h("span", { key: i, className: "sv-step-pill sv-step-" + st.state,
+          title: st.note || st.label },
+          st.state === "done" ? st.label + " ✓"
+            : st.state === "busy" ? st.label + " ●"
+            : st.state === "failed" ? st.label + " ⚠" : st.label,
+          st.note ? h("em", null, " " + st.note) : null);
+      }));
+  }
+
   function SiteVideoTab() {
     var stSt = useState(null);
     var st = stSt[0], setSt = stSt[1];
@@ -3018,6 +3051,10 @@
     var selected = (st && (st.projects || []).filter(function (p) {
       return p.id === sel;
     })[0]) || null;
+    // Auto-select the newest project so finished plans open themselves.
+    useEffect(function () {
+      if (!sel && st && (st.projects || []).length) setSel(st.projects[0].id);
+    }, [st && (st.projects || []).length]);
     useEffect(function () {
       setPlan(selected && selected.plan
         ? JSON.parse(JSON.stringify(selected.plan)) : null);
@@ -3124,6 +3161,12 @@
                 p.hasRender ? h("span", { className: "sv-status sv-status-done" }, "video ✓") : null);
             }))
         : h("p", { className: "sl-muted" }, "No site videos yet — enter a URL and plan one."),
+      selected ? h(SvSteps, { project: selected }) : null,
+      selected && selected.planStatus === "done" && !selected.hasPlan
+        ? h("p", { className: "sl-muted" }, "The planning run finished but no "
+            + "plan.json was produced — open its chat link above to see what "
+            + "happened, then Plan again.")
+        : null,
       selected && plan ? h("div", { className: "sv-editor" },
         h(SiteVideoPreview, { key: selected.id, plan: plan, projectId: selected.id }),
         h("div", { className: "sv-scenes" },
