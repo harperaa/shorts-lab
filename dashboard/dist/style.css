@@ -362,3 +362,13 @@
 .sv-player-s.sv-player-h { width: 480px; height: 270px; }
 .sv-player-m.sv-player-h { width: 640px; height: 360px; }
 .sv-player-l.sv-player-h { width: 860px; height: 484px; }
+
+.sv-studio { margin-top: 18px; }
+.sv-studio h3 { font-size: 14px; font-weight: 800; margin: 0 0 8px; }
+.sv-studio-frame {
+  width: 100%;
+  height: 760px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: #0d1117;
+}

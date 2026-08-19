@@ -3091,7 +3091,7 @@
     useEffect(function () {
       setPlan(selected && selected.plan
         ? JSON.parse(JSON.stringify(selected.plan)) : null);
-    }, [sel, selected && selected.hasPlan]);
+    }, [sel, selected && selected.hasPlan, selected && selected.planMtime]);
 
     function err(e) { alert(String((e && e.message) || e)); }
 
@@ -3129,28 +3129,40 @@
       }).catch(function (e) { setBusy(""); err(e); });
     }
 
-    function openStudio() {
-      if (!selected) return;
-      setBusy("studio");
+    // Remotion Studio embeds at the bottom of the tab — auto-launched for
+    // the selected plan, no button required. Re-staged whenever the plan
+    // changes (Studio hot-reloads plan-props.json).
+    var studioSt = useState({ state: "idle", url: "" });
+    var studio = studioSt[0], setStudio = studioSt[1];
+    useEffect(function () {
+      if (!selected || !selected.hasPlan) return undefined;
+      var dead = false;
+      setStudio(function (s0) {
+        return s0.state === "up" ? s0 : { state: "starting", url: "" };
+      });
       api("/sitevideo/studio", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectId: selected.id }),
       }).then(function (d) {
-        setBusy("");
         var url = d.url || "http://localhost:3333";
         var tries = 0;
         (function waitUp() {
+          if (dead) return;
           api("/sitevideo/studio-status").then(function (st2) {
-            if (st2.running) { window.open(url, "_blank"); return; }
-            if (tries++ < 20) window.setTimeout(waitUp, 1500);
-            else alert("Studio did not come up — check studio.log");
+            if (dead) return;
+            if (st2.running) { setStudio({ state: "up", url: url }); return; }
+            if (tries++ < 30) window.setTimeout(waitUp, 1500);
+            else setStudio({ state: "failed", url: "" });
           }).catch(function () {
-            if (tries++ < 20) window.setTimeout(waitUp, 1500);
+            if (tries++ < 30) window.setTimeout(waitUp, 1500);
+            else setStudio({ state: "failed", url: "" });
           });
         })();
-      }).catch(function (e) { setBusy(""); err(e); });
-    }
+      }).catch(function () { if (!dead) setStudio({ state: "failed", url: "" }); });
+      return function () { dead = true; };
+    }, [selected && selected.id, selected && selected.hasPlan,
+        selected && selected.planMtime]);
 
     function startRender() {
       if (!selected) return;
@@ -3338,12 +3350,7 @@
               title: "Redo the plan for this video with your instructions",
               onClick: function () { setReplanOpen(!replanOpen); },
             }, selected.planStatus === "open" ? "Re-planning…" : "↻ Re-plan"),
-            h("button", { className: "sl-btn",
-              disabled: busy === "studio",
-              title: "Open this plan in the full Remotion Studio editor "
-                + "(local instance — Studio runs on its own port)",
-              onClick: openStudio,
-            }, busy === "studio" ? "Launching…" : "🎛 Remotion Studio"),
+
             selected.hasRender ? h("button", { className: "sl-btn",
               onClick: function () {
                 downloadFile("/sitevideo/file/" + selected.id + "/render.mp4",
@@ -3365,7 +3372,21 @@
         ? h("p", { className: "sl-muted" },
             "The worker is reviewing the site and writing the scene plan — "
             + "this panel fills in when the plan lands (about 3-6 minutes).")
-        : null);
+        : null,
+      selected && selected.hasPlan ? h("div", { className: "sv-studio" },
+        h("h3", null, "🎛 Remotion Studio"),
+        studio.state === "up"
+          ? h("iframe", {
+              className: "sv-studio-frame",
+              src: studio.url,
+              title: "Remotion Studio",
+              allow: "clipboard-read; clipboard-write; fullscreen",
+            })
+          : h("p", { className: "sl-muted" },
+              studio.state === "failed"
+                ? "Studio could not start — check sitevideo/studio.log. "
+                  + "(Local instances only: Studio binds its own port.)"
+                : "Launching Remotion Studio…")) : null);
   }
 
   function ShortsLabPage() {

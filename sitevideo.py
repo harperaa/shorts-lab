@@ -450,11 +450,20 @@ def start_studio(project_id: str) -> dict[str, Any]:
         json.dumps(plan, indent=1))
     if studio_status()["running"]:
         return {"ok": True, **studio_status(), "already": True}
+    npx = shutil.which("npx") or next(
+        (c for c in ("/opt/homebrew/bin/npx", "/usr/local/bin/npx",
+                     "/usr/bin/npx") if Path(c).exists()), None)
+    if not npx:
+        return {"error": "npx not found — install node on this machine"}
+    env = dict(os.environ)
+    env["PATH"] = ":".join(dict.fromkeys(
+        [str(Path(npx).parent), "/opt/homebrew/bin", "/usr/local/bin"]
+        + env.get("PATH", "").split(":")))
     log = open(sitevideo_dir() / "studio.log", "a")
     subprocess.Popen(
-        ["npx", "remotion", "studio", "--port", str(STUDIO_PORT),
+        [npx, "remotion", "studio", "--port", str(STUDIO_PORT),
          "--no-open"],
-        cwd=str(workdir), stdout=log, stderr=log,
+        cwd=str(workdir), stdout=log, stderr=log, env=env,
         start_new_session=True)
     return {"ok": True, **studio_status(), "starting": True}
 
@@ -511,7 +520,8 @@ def public_state() -> dict[str, Any]:
             if entry["hasPlan"]:
                 try:
                     entry["plan"] = json.loads((d / "plan.json").read_text())
-                except ValueError:
+                    entry["planMtime"] = (d / "plan.json").stat().st_mtime
+                except (ValueError, OSError):
                     entry["plan"] = None
             if kb and proj.get("planTaskId"):
                 entry["planStatus"] = _task_state(
