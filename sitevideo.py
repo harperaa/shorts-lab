@@ -299,7 +299,7 @@ def build_render_brief(project_dir: Path, workdir: Path) -> str:
         "",
         "### Render",
         f"  cd {workdir} && npx remotion render src/index.ts SiteDescriber",
-        f"    {out_path} --props={plan_path} --codec=h264",
+        f"    {out_path} --props={plan_path} --codec=h264 --crf=24",
         "First render downloads Remotion's headless chrome (~2 min) — that",
         "is normal. If rendering fails on missing shared libraries, run",
         "`npx remotion browser ensure` and read its output for the apt",

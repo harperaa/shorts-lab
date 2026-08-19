@@ -84,6 +84,7 @@ export function cameraFor(
   viewportH: number,
   pageW: number,
   pageH: number,
+  pan = 0,
 ): { scale: number; tx: number; ty: number } {
   const margin = 0.94;
   // Zoom floor 1.0: the app must always read at 100%+ — a region larger
@@ -98,15 +99,18 @@ export function cameraFor(
     ),
   );
   // Anchor to the region's LEFT edge when it is wider than the viewport at
-  // this scale (web content reads from the left), and to its TOP when
-  // taller (readers scan from the top); otherwise center.
+  // this scale (web content reads from the left). Tall regions PAN: `pan`
+  // (0→1 across the scene) scrolls the camera from the region's top to its
+  // bottom — the noticeable read-through motion; smaller regions center.
   const regionWiderThanView = region.w * scale > viewportW;
   const cx = regionWiderThanView
     ? region.x + viewportW / (2 * scale)
     : region.x + region.w / 2;
   const regionTallerThanView = region.h * scale > viewportH;
+  const topAnchor = region.y + viewportH / (2 * scale);
+  const bottomAnchor = region.y + region.h - viewportH / (2 * scale);
   const cy = regionTallerThanView
-    ? region.y + viewportH / (2 * scale)
+    ? topAnchor + (bottomAnchor - topAnchor) * pan
     : region.y + region.h / 2;
   let tx = viewportW / 2 - cx * scale;
   let ty = viewportH / 2 - cy * scale;
@@ -149,8 +153,8 @@ export const SiteDescriber: React.FC<Props> = (props) => {
   const vw = width - viewportPad * 2;
   const vh = height - viewportPad * 2 - captionBand - chrome;
 
-  const camAt = (region: Region) =>
-    cameraFor(region, vw, vh, props.pageWidth, props.pageHeight);
+  const camAt = (region: Region, pan = 0) =>
+    cameraFor(region, vw, vh, props.pageWidth, props.pageHeight, pan);
 
   let cam = camAt(scenes[0].region);
   let activeIdx = 0;
@@ -160,8 +164,14 @@ export const SiteDescriber: React.FC<Props> = (props) => {
       const s1 = s0 + scenes[i].seconds;
       if (t >= s0 && t < s1) {
         activeIdx = i;
-        const from = camAt(scenes[Math.max(0, i - 1)].region);
-        const to = camAt(scenes[i].region);
+        const prev = scenes[Math.max(0, i - 1)];
+        const from = camAt(prev.region, 1); // previous scene ended panned out
+        const pan = interpolate(t, [s0 + TRANSITION_SEC, s1 - 0.4], [0, 1], {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+          easing: Easing.bezier(0.45, 0, 0.55, 1),
+        });
+        const to = camAt(scenes[i].region, pan);
         const gl = interpolate(t, [s0, s0 + TRANSITION_SEC], [0, 1], {
           extrapolateLeft: "clamp",
           extrapolateRight: "clamp",
@@ -181,7 +191,7 @@ export const SiteDescriber: React.FC<Props> = (props) => {
       }
     }
   } else if (t >= outroStart) {
-    cam = camAt(scenes[scenes.length - 1].region);
+    cam = camAt(scenes[scenes.length - 1].region, 1);
     activeIdx = scenes.length - 1;
   }
 
