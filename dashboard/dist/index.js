@@ -2924,66 +2924,80 @@
   // in CSS) → render (worker: remotion render) → download.
   // -------------------------------------------------------------------------
 
-  // Same camera math as remotion-site-video/src/SiteDescriber.tsx.
-  function svCameraFor(region, vw, vh) {
-    var margin = 0.92;
-    var scale = Math.min(vw / region.w * margin, vh / region.h * margin, 3.5);
-    return {
-      scale: scale,
-      tx: vw / 2 - (region.x + region.w / 2) * scale,
-      ty: vh / 2 - (region.y + region.h / 2) * scale,
-    };
+  // Real Remotion Player (frame-accurate preview with controls). The
+  // self-contained bundle (React + @remotion/player + the composition) is
+  // built by remotion-site-video/scripts/build-player.mjs into
+  // dist/sv-player.js and lazy-loaded here.
+  var svPlayerLoad = null;
+  function loadSvPlayer() {
+    if (window.__SITE_VIDEO_PLAYER__) return Promise.resolve();
+    if (svPlayerLoad) return svPlayerLoad;
+    svPlayerLoad = new Promise(function (resolve, reject) {
+      var sc = document.createElement("script");
+      sc.src = "/dashboard-plugins/shorts-lab/dist/sv-player.js";
+      sc.onload = function () { resolve(); };
+      sc.onerror = function () { svPlayerLoad = null; reject(new Error("player bundle failed to load")); };
+      document.head.appendChild(sc);
+    });
+    return svPlayerLoad;
   }
 
   function SiteVideoPreview(props) {
-    // CSS approximation of the Remotion composition: plays the scenes with
-    // the same framing math over the captured screenshot.
     var plan = props.plan;
-    var idxSt = useState(0);
-    var idx = idxSt[0], setIdx = idxSt[1];
-    var playSt = useState(false);
-    var playing = playSt[0], setPlaying = playSt[1];
+    var hostRef = useRef(null);
+    var shotSt = useState(null);   // blob: URL of the authed screenshot
+    var shot = shotSt[0], setShot = shotSt[1];
+    var errSt = useState(null);
+    var perr = errSt[0], setPerr = errSt[1];
+
     useEffect(function () {
-      if (!playing || !plan || !plan.scenes || !plan.scenes.length) return undefined;
-      var s = plan.scenes[idx % plan.scenes.length];
-      var t = window.setTimeout(function () {
-        setIdx(function (i) { return (i + 1) % plan.scenes.length; });
-      }, Math.max(1500, (s.seconds || 5) * 1000));
-      return function () { window.clearTimeout(t); };
-    }, [playing, idx, plan]);
+      var url = "/api/plugins/shorts-lab/sitevideo/file/" + props.projectId +
+        "/screenshot.png";
+      var tok = null;
+      try { tok = window.__HERMES_SESSION_TOKEN__ || null; } catch (e) {}
+      var dead = false, obj = null;
+      fetch(url, { headers: tok ? { "X-Hermes-Session-Token": tok } : {} })
+        .then(function (r) {
+          if (!r.ok) throw new Error("screenshot HTTP " + r.status);
+          return r.blob();
+        })
+        .then(function (b) {
+          if (dead) return;
+          obj = URL.createObjectURL(b);
+          setShot(obj);
+        })
+        .catch(function (e) { if (!dead) setPerr(String(e.message || e)); });
+      return function () {
+        dead = true;
+        if (obj) URL.revokeObjectURL(obj);
+      };
+    }, [props.projectId]);
+
+    useEffect(function () {
+      if (!plan || !shot || !hostRef.current) return undefined;
+      var el = hostRef.current;
+      var dead = false;
+      loadSvPlayer().then(function () {
+        if (dead || !window.__SITE_VIDEO_PLAYER__) return;
+        var propsCopy = JSON.parse(JSON.stringify(plan));
+        propsCopy.screenshot = shot;
+        propsCopy.sfxBase = "/dashboard-plugins/shorts-lab/dist/";
+        window.__SITE_VIDEO_PLAYER__.mount(el, propsCopy);
+      }).catch(function (e) { setPerr(String(e.message || e)); });
+      return function () {
+        dead = true;
+        try { window.__SITE_VIDEO_PLAYER__ && window.__SITE_VIDEO_PLAYER__.unmount(el); } catch (e) {}
+      };
+    }, [plan, shot]);
+
     if (!plan || !plan.scenes || !plan.scenes.length) return null;
-    var vw = 640, vh = 360;
-    var scene = plan.scenes[Math.min(idx, plan.scenes.length - 1)];
-    var cam = svCameraFor(scene.region, vw, vh);
-    var shot = "/api/plugins/shorts-lab/sitevideo/file/" + props.projectId +
-      "/screenshot.png";
+    var vertical = plan.format !== "landscape" && plan.format !== "landscape4k";
     return h("div", { className: "sv-preview" },
-      h("div", { className: "sv-viewport", style: { width: vw, height: vh } },
-        h(AuthImg, {
-          src: shot,
-          style: {
-            position: "absolute",
-            width: plan.pageWidth,
-            transformOrigin: "0 0",
-            transform: "translate(" + cam.tx + "px," + cam.ty + "px) scale(" + cam.scale + ")",
-            transition: "transform 0.8s cubic-bezier(0.33,1,0.68,1)",
-          },
-        }),
-        h("div", { className: "sv-caption" },
-          scene.headline ? h("span", { className: "sv-chip" }, scene.headline) : null,
-          h("span", null, scene.caption))),
-      h("div", { className: "sv-preview-controls" },
-        h("button", { className: "sl-btn",
-          onClick: function () { setPlaying(!playing); } },
-          playing ? "⏸ Pause" : "▶ Play scenes"),
-        plan.scenes.map(function (s, i) {
-          return h("button", {
-            key: i,
-            className: "sl-tab" + (i === idx ? " sl-tab-on" : ""),
-            onClick: function () { setPlaying(false); setIdx(i); },
-            title: s.caption,
-          }, String(i + 1));
-        })));
+      perr ? h("p", { className: "sl-muted" }, "Preview unavailable: " + perr)
+        : h("div", {
+            ref: hostRef,
+            className: "sv-player " + (vertical ? "sv-player-v" : "sv-player-h"),
+          }));
   }
 
   function SvSteps(props) {
@@ -3030,6 +3044,8 @@
     var plan = planSt[0], setPlan = planSt[1];
     var busySt = useState("");
     var busy = busySt[0], setBusy = busySt[1];
+    var fmtSt = useState("vertical");
+    var fmt = fmtSt[0], setFmt = fmtSt[1];
 
     var load = useCallback(function () {
       api("/sitevideo/state").then(function (d) {
@@ -3067,7 +3083,7 @@
       api("/sitevideo/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: url }),
+        body: JSON.stringify({ url: url, format: fmt }),
       }).then(function (d) { setBusy(""); setSel(d.projectId); load(); })
         .catch(function (e) { setBusy(""); err(e); });
     }
@@ -3136,6 +3152,17 @@
         "writes a multi-phase script, and the camera pans and zooms across ",
         "the sections it describes — built with Remotion, rendered to MP4."),
       h("div", { className: "sv-row" },
+        h("select", {
+          className: "sv-fmt",
+          value: fmt,
+          title: "Video format",
+          onChange: function (e) { setFmt(e.target.value); },
+        },
+          h("option", { value: "vertical" }, "Vertical · Shorts 9:16 (1080×1920)"),
+          h("option", { value: "landscape" }, "Landscape · 1080p (1920×1080)"),
+          h("option", { value: "square" }, "Square · 1:1 (1080×1080)"),
+          h("option", { value: "portrait45" }, "Portrait · 4:5 Feed (1080×1350)"),
+          h("option", { value: "landscape4k" }, "Landscape · 4K (3840×2160)")),
         h("input", {
           className: "sv-url",
           value: url,
@@ -3192,6 +3219,53 @@
                 })));
           }),
           h("div", { className: "sv-actions" },
+            h("select", {
+              className: "sv-fmt",
+              title: "Scene transition effect",
+              value: (plan.effects && plan.effects.transition) || "flash",
+              onChange: function (e) {
+                setPlan(function (p) {
+                  var c = JSON.parse(JSON.stringify(p));
+                  c.effects = c.effects || { sfx: true, particles: true };
+                  c.effects.transition = e.target.value;
+                  return c;
+                });
+              },
+            },
+              h("option", { value: "flash" }, "Flash"),
+              h("option", { value: "glide" }, "Glide only"),
+              h("option", { value: "fade" }, "Fade")),
+            ["sfx", "particles"].map(function (k) {
+              var on = !plan.effects || plan.effects[k] !== false;
+              return h("label", { key: k, className: "sv-reg" },
+                h("input", { type: "checkbox", checked: on,
+                  onChange: function (e) {
+                    var v = e.target.checked;
+                    setPlan(function (p) {
+                      var c = JSON.parse(JSON.stringify(p));
+                      c.effects = c.effects || { transition: "flash" };
+                      c.effects[k] = v;
+                      return c;
+                    });
+                  } }),
+                k === "sfx" ? "sounds" : "smoke");
+            }),
+            h("select", {
+              className: "sv-fmt",
+              value: plan.format || "vertical",
+              onChange: function (e) {
+                setPlan(function (p) {
+                  var c = JSON.parse(JSON.stringify(p));
+                  c.format = e.target.value;
+                  return c;
+                });
+              },
+            },
+              h("option", { value: "vertical" }, "Vertical 9:16"),
+              h("option", { value: "landscape" }, "Landscape 1080p"),
+              h("option", { value: "square" }, "Square 1:1"),
+              h("option", { value: "portrait45" }, "Portrait 4:5"),
+              h("option", { value: "landscape4k" }, "Landscape 4K")),
             h("button", { className: "sl-btn",
               disabled: busy === "save", onClick: savePlan },
               busy === "save" ? "Saving…" : "Save plan"),

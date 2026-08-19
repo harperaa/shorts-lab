@@ -1,11 +1,17 @@
 import React from "react";
 import { Composition } from "remotion";
-import { SiteDescriber, siteDescriberSchema, FPS } from "./SiteDescriber";
+import {
+  SiteDescriber,
+  siteDescriberSchema,
+  FPS,
+  FORMATS,
+} from "./SiteDescriber";
 
 const DEFAULTS = {
   title: "Site Tour",
   url: "https://example.com",
   accent: "#14b8a6",
+  format: "vertical" as const,
   screenshot: "",
   pageWidth: 1440,
   pageHeight: 4000,
@@ -26,8 +32,8 @@ export const Root: React.FC = () => {
       id="SiteDescriber"
       component={SiteDescriber}
       schema={siteDescriberSchema}
-      width={1920}
-      height={1080}
+      width={FORMATS.vertical.width}
+      height={FORMATS.vertical.height}
       fps={FPS}
       durationInFrames={60 * FPS}
       defaultProps={DEFAULTS}
@@ -38,7 +44,12 @@ export const Root: React.FC = () => {
           (sum: number, s: { seconds?: number }) => sum + (s.seconds ?? 5),
           0,
         );
+        const fmt =
+          FORMATS[(props as { format?: string }).format ?? "vertical"] ??
+          FORMATS.vertical;
         return {
+          width: fmt.width,
+          height: fmt.height,
           durationInFrames: Math.max(
             1,
             Math.round((INTRO + body + OUTRO) * FPS),

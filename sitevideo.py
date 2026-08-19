@@ -199,7 +199,8 @@ def _setup_lines(workdir: Path) -> list[str]:
     ]
 
 
-def build_plan_brief(url: str, project_dir: Path, workdir: Path) -> str:
+def build_plan_brief(url: str, project_dir: Path, workdir: Path,
+                     video_format: str = "vertical") -> str:
     plan_path = project_dir / "plan.json"
     return "\n".join([
         "## MANDATORY: Plan a 60-second site describer video for ONE URL.",
@@ -230,6 +231,11 @@ def build_plan_brief(url: str, project_dir: Path, workdir: Path) -> str:
         "write the video plan: a 60-second guided tour that DESCRIBES the",
         "site's features while the camera pans/zooms to the region being",
         "described. Structure:",
+        f"- format: {video_format} "
+        + ("(1080x1920 shorts — the camera pans VERTICALLY through "
+           "full-width sections; regions may span the full page width)"
+           if video_format == "vertical"
+           else "(1920x1080 — frame regions comfortably for widescreen)"),
         "- intro (title card, ~2.5s, automatic) — pick a punchy `title`",
         "- 5-8 scenes, `seconds` between 5 and 10, TOTALING 50-55s: each has",
         "  a short `headline` (2-4 words), a spoken-style `caption` (one",
@@ -243,6 +249,8 @@ def build_plan_brief(url: str, project_dir: Path, workdir: Path) -> str:
         "```json",
         "{",
         '  "title": "…", "url": "' + url + '", "accent": "#14b8a6",',
+        '  "format": "' + video_format + '",',
+        '  "effects": {"transition": "flash", "sfx": true, "particles": true},',
         '  "screenshot": "' + project_dir.name + '.png",',
         '  "pageWidth": <from page.json>, "pageHeight": <from page.json>,',
         '  "scenes": [{"headline": "…", "caption": "…", "seconds": 7,',
@@ -327,10 +335,13 @@ def _create_task(title: str, body: str, skills: tuple[str, ...]) -> str:
     return task_id
 
 
-def start_plan(url: str) -> dict[str, Any]:
+def start_plan(url: str, video_format: str = "vertical") -> dict[str, Any]:
     url = (url or "").strip()
     if not re.match(r"^https?://[^\s]+$", url):
         return {"error": "enter a valid http(s) URL"}
+    if video_format not in ("vertical", "landscape", "square",
+                            "portrait45", "landscape4k"):
+        video_format = "vertical"
     state = load_state()
     state["defaultUrl"] = url
     pid = _slug(url)
@@ -340,12 +351,13 @@ def start_plan(url: str) -> dict[str, Any]:
     try:
         task_id = _create_task(
             f"Site Video plan: {url[:60]}",
-            build_plan_brief(url, project_dir, workdir),
+            build_plan_brief(url, project_dir, workdir, video_format),
             PLAN_SKILLS)
     except RuntimeError as exc:
         return {"error": str(exc)}
     state["projects"][pid] = {
         "url": url, "dir": str(project_dir), "createdAt": _now_iso(),
+        "format": video_format,
         "planTaskId": task_id, "planCreatedAt": _now_iso(),
     }
     save_state(state)

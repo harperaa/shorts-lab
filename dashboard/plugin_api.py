@@ -67,6 +67,7 @@ router = APIRouter()
 
 class SiteVideoPlanBody(BaseModel):
     url: str
+    format: str = "vertical"
 
 
 @router.get("/sitevideo/state")
@@ -76,7 +77,7 @@ def get_sitevideo_state():
 
 @router.post("/sitevideo/plan")
 def post_sitevideo_plan(body: SiteVideoPlanBody):
-    result = sitevideo.start_plan(body.url)
+    result = sitevideo.start_plan(body.url, body.format)
     if result.get("error"):
         raise HTTPException(400, result["error"])
     return result

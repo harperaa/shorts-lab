@@ -344,3 +344,13 @@
 .sv-step-busy { color: var(--color-primary, #14b8a6);
   border-color: var(--color-primary, #14b8a6); font-weight: 700; }
 .sv-step-failed { color: #f59e0b; border-color: #f59e0b; }
+
+.sv-fmt {
+  background: var(--color-background, transparent);
+  border: 1px solid var(--color-border);
+  border-radius: 8px; color: inherit; font: inherit; font-size: 12.5px;
+  padding: 7px 10px;
+}
+.sv-player { border-radius: 10px; overflow: hidden; border: 1px solid var(--color-border); background: #000; }
+.sv-player-h { width: 640px; height: 360px; }
+.sv-player-v { width: 320px; height: 568px; }
