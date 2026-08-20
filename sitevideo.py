@@ -200,8 +200,10 @@ def _setup_lines(workdir: Path) -> list[str]:
 
 
 def build_plan_brief(url: str, project_dir: Path, workdir: Path,
-                     video_format: str = "vertical") -> str:
+                     video_format: str = "vertical",
+                     guidance: str = "") -> str:
     plan_path = project_dir / "plan.json"
+    guidance = (guidance or "").strip()[:2000]
     return "\n".join([
         "## MANDATORY: Plan a 60-second site describer video for ONE URL.",
         "",
@@ -213,6 +215,15 @@ def build_plan_brief(url: str, project_dir: Path, workdir: Path,
         "`shorts-lab:remotion-best-practices` and `shorts-lab:remotion-create`",
         "skills for grounding on the composition this plan drives.",
         "",
+        *(["### The user's guidance (HIGHEST priority — shapes the scan "
+           "and the whole video)",
+           "```",
+           guidance,
+           "```",
+           "Honor it in scene selection, captions, pacing, and framing — "
+           "e.g. which sections to feature or skip, the angle, the tone, "
+           "the audience.",
+           ""] if guidance else []),
         *_setup_lines(workdir),
         "### Step 1 — Capture the page",
         f"  cd {workdir} && node scripts/screenshot.mjs '{url}' '{project_dir}'",
@@ -335,7 +346,8 @@ def _create_task(title: str, body: str, skills: tuple[str, ...]) -> str:
     return task_id
 
 
-def start_plan(url: str, video_format: str = "vertical") -> dict[str, Any]:
+def start_plan(url: str, video_format: str = "vertical",
+               guidance: str = "") -> dict[str, Any]:
     url = (url or "").strip()
     if not re.match(r"^https?://[^\s]+$", url):
         return {"error": "enter a valid http(s) URL"}
@@ -351,7 +363,8 @@ def start_plan(url: str, video_format: str = "vertical") -> dict[str, Any]:
     try:
         task_id = _create_task(
             f"Site Video plan: {url[:60]}",
-            build_plan_brief(url, project_dir, workdir, video_format),
+            build_plan_brief(url, project_dir, workdir, video_format,
+                             guidance),
             PLAN_SKILLS)
     except RuntimeError as exc:
         return {"error": str(exc)}

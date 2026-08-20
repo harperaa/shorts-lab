@@ -2924,95 +2924,6 @@
   // in CSS) → render (worker: remotion render) → download.
   // -------------------------------------------------------------------------
 
-  // Real Remotion Player (frame-accurate preview with controls). The
-  // self-contained bundle (React + @remotion/player + the composition) is
-  // built by remotion-site-video/scripts/build-player.mjs into
-  // dist/sv-player.js and lazy-loaded here.
-  var svPlayerLoad = null;
-  function loadSvPlayer() {
-    if (window.__SITE_VIDEO_PLAYER__) return Promise.resolve();
-    if (svPlayerLoad) return svPlayerLoad;
-    svPlayerLoad = new Promise(function (resolve, reject) {
-      var sc = document.createElement("script");
-      sc.src = "/dashboard-plugins/shorts-lab/dist/sv-player.js";
-      sc.onload = function () { resolve(); };
-      sc.onerror = function () { svPlayerLoad = null; reject(new Error("player bundle failed to load")); };
-      document.head.appendChild(sc);
-    });
-    return svPlayerLoad;
-  }
-
-  function SiteVideoPreview(props) {
-    var plan = props.plan;
-    var hostRef = useRef(null);
-    var sizeSt = useState("m");
-    var psize = sizeSt[0], setPsize = sizeSt[1];
-    var shotSt = useState(null);   // blob: URL of the authed screenshot
-    var shot = shotSt[0], setShot = shotSt[1];
-    var errSt = useState(null);
-    var perr = errSt[0], setPerr = errSt[1];
-
-    useEffect(function () {
-      var url = "/api/plugins/shorts-lab/sitevideo/file/" + props.projectId +
-        "/screenshot.png";
-      var tok = null;
-      try { tok = window.__HERMES_SESSION_TOKEN__ || null; } catch (e) {}
-      var dead = false, obj = null;
-      fetch(url, { headers: tok ? { "X-Hermes-Session-Token": tok } : {} })
-        .then(function (r) {
-          if (!r.ok) throw new Error("screenshot HTTP " + r.status);
-          return r.blob();
-        })
-        .then(function (b) {
-          if (dead) return;
-          obj = URL.createObjectURL(b);
-          setShot(obj);
-        })
-        .catch(function (e) { if (!dead) setPerr(String(e.message || e)); });
-      return function () {
-        dead = true;
-        if (obj) URL.revokeObjectURL(obj);
-      };
-    }, [props.projectId]);
-
-    useEffect(function () {
-      if (!plan || !shot || !hostRef.current) return undefined;
-      var el = hostRef.current;
-      var dead = false;
-      loadSvPlayer().then(function () {
-        if (dead || !window.__SITE_VIDEO_PLAYER__) return;
-        var propsCopy = JSON.parse(JSON.stringify(plan));
-        propsCopy.screenshot = shot;
-        propsCopy.sfxBase = "/dashboard-plugins/shorts-lab/dist/";
-        window.__SITE_VIDEO_PLAYER__.mount(el, propsCopy);
-      }).catch(function (e) { setPerr(String(e.message || e)); });
-      return function () {
-        dead = true;
-        try { window.__SITE_VIDEO_PLAYER__ && window.__SITE_VIDEO_PLAYER__.unmount(el); } catch (e) {}
-      };
-    }, [plan, shot]);
-
-    if (!plan || !plan.scenes || !plan.scenes.length) return null;
-    var vertical = plan.format !== "landscape" && plan.format !== "landscape4k";
-    return h("div", { className: "sv-preview" },
-      h("div", { className: "sv-preview-controls" },
-        ["s", "m", "l"].map(function (z) {
-          return h("button", {
-            key: z,
-            className: "sl-tab" + (psize === z ? " sl-tab-on" : ""),
-            onClick: function () { setPsize(z); },
-          }, z.toUpperCase());
-        }),
-        h("span", { className: "sl-muted", style: { fontSize: 11.5 } },
-          "player size — fullscreen via the player's own control")),
-      perr ? h("p", { className: "sl-muted" }, "Preview unavailable: " + perr)
-        : h("div", {
-            ref: hostRef,
-            className: "sv-player sv-player-" + psize + " " +
-              (vertical ? "sv-player-v" : "sv-player-h"),
-          }));
-  }
-
   function SvSteps(props) {
     // The pipeline at a glance: Plan → Edit → Render → Download.
     var p = props.project;
@@ -3059,6 +2970,8 @@
     var busy = busySt[0], setBusy = busySt[1];
     var fmtSt = useState("vertical");
     var fmt = fmtSt[0], setFmt = fmtSt[1];
+    var guideSt = useState("");
+    var guidance = guideSt[0], setGuidance = guideSt[1];
     var replanSt = useState(false);
     var replanOpen = replanSt[0], setReplanOpen = replanSt[1];
     var replanTextSt = useState("");
@@ -3100,7 +3013,7 @@
       api("/sitevideo/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: url, format: fmt }),
+        body: JSON.stringify({ url: url, format: fmt, guidance: guidance }),
       }).then(function (d) { setBusy(""); setSel(d.projectId); load(); })
         .catch(function (e) { setBusy(""); err(e); });
     }
@@ -3239,6 +3152,12 @@
           disabled: busy === "plan" || !url.trim(),
           onClick: startPlan,
         }, busy === "plan" ? "Starting…" : "🎬 Plan video")),
+      h("textarea", {
+        className: "sv-in sv-in-cap sv-guidance",
+        value: guidance,
+        placeholder: "Optional guidance for the scan and video — e.g. focus on the pricing and onboarding sections, skip the footer, aim at security-minded founders, energetic tone…",
+        onChange: function (e) { setGuidance(e.target.value); },
+      }),
       st && (st.projects || []).length
         ? h("div", { className: "sv-projects" },
             (st.projects || []).map(function (p) {
@@ -3260,7 +3179,6 @@
             + "happened, then Plan again.")
         : null,
       selected && plan ? h("div", { className: "sv-editor" },
-        h(SiteVideoPreview, { key: selected.id, plan: plan, projectId: selected.id }),
         h("div", { className: "sv-scenes" },
           h("h3", null, "Scenes (" + plan.scenes.length + " · " +
             Math.round(totalSecs) + "s + intro/outro)"),

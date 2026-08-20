@@ -297,9 +297,10 @@
 .sv-status-open { color: #f59e0b; border-color: #f59e0b; }
 .sv-status-done { color: #2ecc71; border-color: #2ecc71; }
 .sv-status-stale, .sv-status-gone { opacity: 0.6; }
-.sv-editor { display: grid; grid-template-columns: 660px minmax(0,1fr); gap: 16px; align-items: start; }
-@media (max-width: 1250px) { .sv-editor { grid-template-columns: 1fr; } }
-.sv-preview { position: sticky; top: 12px; }
+.sv-editor { display: block; }
+.sv-scenes { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 10px; }
+.sv-scenes h3, .sv-actions, .sv-replan { grid-column: 1 / -1; }
+.sv-guidance { margin: -6px 0 12px; min-height: 56px; }
 .sv-viewport {
   position: relative; overflow: hidden; border-radius: 10px;
   border: 1px solid var(--color-border); background: #0d1117;
